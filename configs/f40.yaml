@@ -1,0 +1,39 @@
+# Ferrari F40 (AC: ferrari_f40) - STARTING ESTIMATES from published road-car figures,
+# not AC's internal data (Kunos cars ship encrypted data.acd). Refine with
+# scripts/identify.py from your own laps. Values marked (!) matter most.
+name: f40
+
+m: 1250.0           # kg, ~1100 dry + fluids, fuel, driver (!)
+Iz: 1650.0          # kg m^2 yaw inertia
+lf: 1.42            # m, CoG -> front axle (wheelbase 2.45 m, ~42% front / 58% rear)
+lr: 1.03
+h_cg: 0.45
+car_width: 1.97
+
+rho: 1.20
+ClA: 0.30           # m^2, small net downforce (rear wing) (!)
+CdA: 0.65           # m^2  (Cd ~0.34 x ~1.9 m^2)
+aero_bal: 0.35      # front share of downforce
+Crr: 0.015
+
+mu: 1.15            # peak friction, road tyres of the period (!)
+B_f: 10.0           # Pacejka stiffness -> peak slip ~10 deg (soft, tall sidewalls)
+C_f: 1.50
+B_r: 10.0
+C_r: 1.50
+load_sens: 0.10
+sat_k: 8.0
+
+P_max: 310000.0     # W at the wheels (~478 hp at the crank, ~12% driveline loss) (!)
+F_drive_max: 11000.0   # N, low-gear thrust limit at the wheels
+F_brake_max: 15500.0   # N at full pedal (~1.25 g). No ABS on this car.
+brake_bias: 0.60
+
+# Road-wheel steering limits. In AC: delta_max = STEER_LOCK / STEER_RATIO (car.ini [CONTROLS]).
+delta_max: 0.50     # rad (~29 deg) - plenty of lock, so large drift angles are possible (!)
+ddelta_max: 1.8     # rad/s
+dT_max: 5.0
+v_min: 4.0
+
+steer_lock_wheel_deg: 400.0   # half lock-to-lock in AC controls - check in the car's setup screen
+steer_ratio: 13.9

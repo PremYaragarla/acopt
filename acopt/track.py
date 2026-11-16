@@ -179,6 +179,22 @@ class Track:
         w = np.full(len(cp), half_width)
         return Track(cp, w, w, name="synthetic_club")
 
+    @staticmethod
+    def synthetic_long(length_km=20.8, half_width=4.5, seed=7):
+        """Long invented circuit (default ~20.8 km, 8-9 m wide, corners down to ~35 m radius)
+        for checking that planning, driving and logging scale to a Nordschleife-length lap.
+        It is NOT the Nordschleife: flat, and the corners are random."""
+        rng = np.random.default_rng(seed)
+        th = np.linspace(0, 2 * np.pi, 6000, endpoint=False)
+        r = np.ones_like(th)
+        for k, amp in ((2, 0.16), (3, 0.10), (5, 0.07), (9, 0.035), (14, 0.02), (23, 0.011), (37, 0.0045)):
+            r += amp * np.cos(k * th + rng.uniform(0, 2 * np.pi))
+        xy = np.c_[r * np.cos(th), r * np.sin(th)]
+        per = np.sum(np.linalg.norm(np.diff(np.vstack([xy, xy[:1]]), axis=0), axis=1))
+        xy *= 1000.0 * length_km / per
+        w = np.full(len(xy), half_width)
+        return Track(xy[::3], w[::3], w[::3], name="synthetic_long")
+
     def summary(self):
         return (f"{self.name}: length {self.length:.0f} m, "
                 f"min radius {1/np.max(np.abs(self.kappa)):.1f} m, "

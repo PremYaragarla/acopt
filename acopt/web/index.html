@@ -133,6 +133,7 @@ details { margin-top: 8px; } summary { cursor: pointer; color: var(--text-2); }
   <div class="col">
   <section class="card">
     <h2>Track <span class="hint" id="trackhint"></span>
+      <label class="hint" title="Zoom in and keep the car centred (useful on long tracks)"><input type="checkbox" id="follow"> follow car</label>
       <span class="legend" style="margin-left:auto">
         <span><i class="sw dash" style="border-color:var(--ref)"></i>reference line</span>
         <span><i class="sw" style="border-color:var(--s-compare);border-top-width:4px"></i>drift segment</span>
@@ -410,8 +411,10 @@ let MT = null;
 function mapTransform(W, H) {
   const xs = ST.left[0].concat(ST.right[0]), ys = ST.left[1].concat(ST.right[1]);
   const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-  const k = Math.min((W - 30) / (maxx - minx), (H - 30) / (maxy - miny));
-  const ox = (W - k * (maxx - minx)) / 2 - k * minx, oy = (H + k * (maxy - miny)) / 2 + k * miny;
+  let k = Math.min((W - 30) / (maxx - minx), (H - 30) / (maxy - miny));
+  let ox = (W - k * (maxx - minx)) / 2 - k * minx, oy = (H + k * (maxy - miny)) / 2 + k * miny;
+  if ($('follow').checked && last) { k = Math.max(k, Math.min(W, H) / 700);   // ~700 m across
+    ox = W / 2 - k * last[F.X]; oy = H / 2 + k * last[F.Y]; }
   return { k, x: X => ox + k * X, y: Y => oy - k * Y, ix: px => (px - ox) / k, iy: py => (oy - py) / k };
 }
 function drawMap() {
@@ -587,7 +590,7 @@ document.querySelectorAll('[data-kick]').forEach(b => b.addEventListener('click'
 async function loadStatic() {
   const s = await api('/api/static'); if (!s.ready) return false;
   ST = s; s.tick_fields.forEach((k, i) => F[k] = i);
-  $('trackhint').textContent = `${s.corners.length} corners`;
+  $('trackhint').textContent = `${s.corners.length} corners`; $('follow').checked = s.length > 6000;
   $('corner').innerHTML = '<option value="">choose…</option>' + s.corners.map(c => `<option value="${c.name}">${c.name} · ${c.dir} · R ${c.radius} m · ${c.s_start}–${c.s_end} m</option>`).join('');
   $('ppath').textContent = s.profile_path ? s.profile_path.split(/[\\/]/).slice(-2).join('/') : '';
   $('p_save').disabled = $('p_load').disabled = !s.profile_path;
@@ -612,6 +615,7 @@ async function poll() {
 }
 let busy = false;
 setInterval(async () => { if (busy || document.hidden) return; busy = true; try { await poll(); } finally { busy = false; } }, 100);
+$('follow').addEventListener('change', drawMap);
 window.addEventListener('resize', () => { drawMap(); drawCharts(); drawTrend(); });
 </script>
 </body>

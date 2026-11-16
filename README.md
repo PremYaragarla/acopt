@@ -150,6 +150,42 @@ Kunos cars ship encrypted data (`data.acd`), so `configs/f2004.yaml` holds infor
 estimates (mass, power, aero, tyres, steering lock). Steps 4–7 replace guesses with
 measurements. The values marked `(!)` matter most.
 
+## Other cars and tracks (example: Ferrari F40, Nordschleife)
+
+A car is a YAML of physical parameters, a track is a path to its `fast_lane.ai`, and a
+session config ties them together. Included:
+
+| Config | Car / track |
+|---|---|
+| `configs/vallelunga_club_f2004.yaml` | F2004, Vallelunga Club |
+| `configs/nordschleife_f40.yaml` | F40 (`configs/f40.yaml`), Nordschleife (`ks_nordschleife`) |
+| `configs/sim_long_f40.yaml` | F40 on an invented flat 20.8 km circuit in the simulator, to rehearse a long lap without the game |
+
+For another combination copy a config, change `vehicle:`, `track.path`, `raceline.cache`
+and `log_dir`, and follow the same steps (probe, plan, drive, identify).
+
+**Lap length.** There is no limit on lap or session time. Long tracks are planned in
+overlapping 2 km windows that are stitched together (a single whole-lap solve of
+20 km ran out of memory in testing); the dashboard buffers scale with the lap, and the map has a
+"follow car" zoom. What a long lap costs is waiting: the first plan takes minutes
+instead of one, and learning improves the line once per lap, so once per ~8 minutes.
+
+Checked in the simulator with `configs/sim_long_f40.yaml`: the 20.8 km plan took about
+9 minutes (11 windows, ~3.5 GB of memory), and the F40 drove the full lap in 5:31.6
+against a planned 5:22.5 with no supervisor interventions. On the short circuit the
+windowed plan reproduces the whole-lap plan's lap time (35.239 s both ways).
+
+**Limits you should know about for the Nordschleife / F40:**
+
+- The model is **flat**. Crests where the car goes light, compressions, banking and
+  gradients are not in the plan. The config therefore starts at 80 % speed with a
+  pessimistic grip map and wider edge margins; learning then lowers grip where the car
+  struggled. A crash on the first laps is still possible, and there is no run-off.
+- `configs/f40.yaml` is built from published road-car figures, not from AC's data.
+  Run `scripts/identify.py` on your first laps.
+- No gears or turbo lag in the model. Use AC's automatic gearbox (or `auto_shift`).
+- Front- or all-wheel-drive cars need a model change (drive force is on the rear axle).
+
 ## Drift profiles and live changes
 
 A profile is the race line plus segments. A drift segment holds a sideslip angle

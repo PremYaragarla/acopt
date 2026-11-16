@@ -59,8 +59,10 @@ def load_track(tc: dict, root: Path) -> Track:
     src = tc.get("source", "synthetic")
     if src == "synthetic":
         return Track.synthetic_club(tc.get("half_width", 6.0))
+    if src == "synthetic_long":
+        return Track.synthetic_long(tc.get("length_km", 20.8), tc.get("half_width", 4.5))
     if src not in ("csv", "fast_lane_ai"):
-        raise ConfigError(f"track.source must be synthetic, csv or fast_lane_ai (got {src!r})")
+        raise ConfigError(f"track.source must be synthetic, synthetic_long, csv or fast_lane_ai (got {src!r})")
     if not tc.get("path"):
         raise ConfigError(f"track.path is required for source '{src}'")
     path = Path(tc["path"])
@@ -109,7 +111,8 @@ class Session:
         self.rl_path = R(rc.get("cache", f"out/{self.track.name}_{self.params.name}.npz"))
         self.rl_path.parent.mkdir(parents=True, exist_ok=True)
         self.plan_kw = dict(ds=rc.get("ds", 4.0), margin=rc.get("margin", 0.4),
-                            beta_max_deg=rc.get("beta_max_deg", 8.0))
+                            beta_max_deg=rc.get("beta_max_deg", 8.0),
+                            window_m=rc.get("window_m"), overlap_m=rc.get("overlap_m", 600.0))
         lc = cfg.get("learning", {})
         self.learner = GripLearner(self.track, self.model, _dc(LearnCfg, lc), mu0=lc.get("mu0", 1.0))
         self.learning = bool(lc.get("enabled", False))
@@ -126,9 +129,15 @@ class Session:
             except Exception as e:  # noqa: BLE001 - truncated / old-format cache
                 print(f"[session] could not read cached race line ({e}); re-planning")
         if self.raceline is None:
-            self.hub.set_phase("planning", "computing the minimum-lap-time line (about a minute, cached afterwards)")
-            rl = plan_min_lap_time(self.track, self.params, mu_map=self.learner.mu_map(),
-                                   verbose=bool(cfg.get("verbose_planner", False)), **self.plan_kw)
+            n_st = self.track.length / self.plan_kw["ds"]
+            eta = "about a minute" if n_st <= 1200 else f"roughly {max(2, round(n_st / 400))} minutes"
+            msg = f"computing the minimum-lap-time line ({eta}, cached afterwards)"
+            self.hub.set_phase("planning", msg)
+            rl = plan_min_lap_time(
+                self.track, self.params, mu_map=self.learner.mu_map(),
+                verbose=bool(cfg.get("verbose_planner", False)),
+                progress=lambda i, n: self.hub.set_phase("planning", f"{msg}: part {i + 1} of {n}"),
+                **self.plan_kw)
             if not np.all(np.isfinite(rl.X)) or rl.meta["status"] not in OK_STATUS:
                 raise ConfigError(f"race line planner failed ({rl.meta['status']}). Check the vehicle "
                                   "parameters and track widths; try a larger raceline.ds.")
@@ -166,6 +175,7 @@ class Session:
         self.out_dir = self.log_root / time.strftime("%Y%m%d_%H%M%S")
         self._replan_thread = None
         self.server = self.watcher = None
+        self.hub.fit_lap(self.raceline.lap_time)
         self.hub.set_phase("ready")
 
     # ------------------------------------------------------------------

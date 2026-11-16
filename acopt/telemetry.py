@@ -136,11 +136,14 @@ def load_lap(path) -> list[dict]:
     return out
 
 
-def lap_trace(log: list[dict], n_points: int = 600) -> dict:
-    """Lap resampled on an even grid of lap distance, for plotting (display units)."""
+def lap_trace(log: list[dict], n_points: int | None = None) -> dict:
+    """Lap resampled on an even grid of lap distance, for plotting (display units).
+    Default resolution: about one point per 3 m, between 600 and 2500 points."""
     if len(log) < 2:
         return dict(s=[])
     s = _col(log, "s")
+    if n_points is None:
+        n_points = int(np.clip((np.nanmax(s) - np.nanmin(s)) / 3.0, 600, 2500))
     # unwrap distance so a lap that starts mid-track is still monotonic
     L = max(float(np.nanmax(s)), 1.0)
     order = np.argsort(s, kind="stable")
@@ -161,7 +164,9 @@ def lap_trace(log: list[dict], n_points: int = 600) -> dict:
 
 
 class TelemetryHub:
-    def __init__(self, hist_hz: float = 20.0, maxlen: int = 6000):
+    MAXLEN = 6000
+
+    def __init__(self, hist_hz: float = 20.0, maxlen: int = MAXLEN):
         self._lock = threading.Lock()
         self.hist_dt = 1.0 / hist_hz
         self.ticks: deque = deque(maxlen=maxlen)      # rows in TICK_FIELDS order
@@ -174,6 +179,11 @@ class TelemetryHub:
         self._t_hist = -1e9
         self.phase, self.phase_msg = "starting", ""
         self.t0 = time.time()
+
+    def fit_lap(self, lap_time_s: float):
+        """Pick the history rate so that more than one whole lap always fits in the buffer
+        (20 Hz for short laps, ~10 Hz for an 8-minute lap)."""
+        self.hist_dt = max(0.05, 1.25 * float(lap_time_s) / (self.ticks.maxlen or self.MAXLEN))
 
     # ---- writers (control loop / session) ----
     def set_phase(self, phase: str, msg: str = ""):
@@ -221,7 +231,7 @@ class TelemetryHub:
                 del self.traces[k]
 
     # ---- readers ----
-    def snapshot(self, since: int = 0, ev_since: int = 0, max_ticks: int = 3000) -> dict:
+    def snapshot(self, since: int = 0, ev_since: int = 0, max_ticks: int = MAXLEN) -> dict:
         with self._lock:
             ticks = [r for r in self.ticks if r[0] > since][-max_ticks:]
             events = [e for e in self.events if e["seq"] > ev_since]

@@ -144,7 +144,7 @@ class App:
             return dict(ready=False, error=self.error, phase=self.hub.phase, phase_msg=self.hub.phase_msg)
         if self._static is None:
             tr = s.track
-            step = max(1, int(round(3.0 / tr.ds)))
+            step = max(1, int(round(max(3.0, tr.length / 3000.0) / tr.ds)))
             ss = tr.s[::step]
             rd = lambda a: np.round(a, 2).tolist()
             lx, ly = tr.to_world(ss, tr.interp(tr.w_left, ss))
@@ -166,7 +166,7 @@ class App:
             return dict(version=-1)
         ver = s.profile.version
         if self._ref[0] != ver:
-            ref = s.profile.reference(step=max(1, int(round(2.0 / s.track.ds))))
+            ref = s.profile.reference(step=max(1, int(round(max(2.0, s.track.length / 2600.0) / s.track.ds))))
             X, Y = s.track.to_world(np.array(ref["s"]), np.array(ref["n"]))
             ref.update(version=ver, X=np.round(X, 2).tolist(), Y=np.round(Y, 2).tolist())
             self._ref = (ver, ref)

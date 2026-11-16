@@ -1,0 +1,7 @@
+# Nordschleife, F40: race line at a cautious pace. Raise speed_scale in small steps
+# (dashboard slider) once laps are clean. Segments can slow individual sections, e.g.
+#   - {name: flugplatz, mode: race, s_start: 2700, s_end: 3100, speed_scale: 0.85}
+speed_scale: 0.80
+segments: []
+weights:
+  race:  {n: 4.0, v: 1.0, beta: 0.05, r: 0.2, xi: 0.3, time: 0.0, ff_delta: 0.02, ff_T: 0.2, ddelta: 5.0, dT: 0.5}

@@ -221,3 +221,18 @@ def test_impossible_start_ends_in_recovery_not_a_loop(session):
         session.cfg["env"].pop("start_s", None)
     assert log[-1]["state"] == "MPC" and log[-1]["vx"] > 15
     assert abs(log[-1]["n"] - log[-1]["n_ref"]) < 1.5
+
+
+def test_windowed_plan_matches_whole_lap_plan(session):
+    """Long tracks are planned in overlapping windows. On the short circuit the stitched
+    result must agree with the single whole-lap solve and close the lap without a jump."""
+    from acopt.planner import plan_min_lap_time
+    ref = session.raceline
+    rl = plan_min_lap_time(session.track, session.params, ds=8.0, mu_map=(ref.s, ref.mu),
+                           window_m=900.0, overlap_m=400.0, verbose=False)
+    assert rl.meta["status"] == "optimal" and rl.meta["windows"] == 2
+    assert abs(rl.lap_time - ref.lap_time) < 0.01 * ref.lap_time, (rl.lap_time, ref.lap_time)
+    v = rl.col("vx")
+    assert np.abs(np.diff(np.r_[v, v[0]])).max() < 4.0          # no seam, including start/finish
+    n_ref = np.interp(rl.s, ref.s, ref.col("n"))
+    assert np.abs(rl.col("n") - n_ref).max() < 1.0

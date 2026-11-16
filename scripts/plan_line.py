@@ -26,7 +26,9 @@ p = VehicleParams.from_yaml(root / cfg["vehicle"])
 tr = load_track(cfg["track"], root)
 print(tr.summary())
 rc = cfg.get("raceline", {})
-rl = plan_min_lap_time(tr, p, ds=a.ds or rc.get("ds", 4.0), margin=rc.get("margin", 0.4))
+rl = plan_min_lap_time(tr, p, ds=a.ds or rc.get("ds", 4.0), margin=rc.get("margin", 0.4),
+                       window_m=rc.get("window_m"), overlap_m=rc.get("overlap_m", 600.0))
+rl.meta["track_length"] = tr.length
 out = root / rc.get("cache", f"out/{tr.name}_{p.name}.npz")
 out.parent.mkdir(parents=True, exist_ok=True)
 rl.save(out)
