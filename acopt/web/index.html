@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>acopt dashboard</title>
+<style>
+:root {
+  color-scheme: dark;
+  --page: #121211; --surface: #1a1a19; --surface-2: #232321; --line: #33332f; --grid: #2a2a27;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e85;
+  --s-actual: #3987e5; --s-compare: #d95926; --s-plan: #199e70; --ref: #a3a299;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  --drift-band: rgba(217, 89, 38, 0.13);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .02em; }
+.sub { color: var(--text-2); }
+.muted { color: var(--muted); }
+.spacer { flex: 1 1 auto; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ctl label { color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
+button { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #1c5cab; border-color: #2a78d6; }
+button.danger { background: #6d2020; border-color: var(--crit); }
+button.small { padding: 2px 8px; }
+input[type=number], input[type=text], select { background: var(--page); border: 1px solid var(--line);
+  border-radius: 5px; padding: 3px 6px; min-width: 0; }
+input[type=number] { width: 68px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid #3987e5; outline-offset: 1px; }
+main { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 12px; padding: 12px 16px 28px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2);
+  margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+#mapwrap { position: relative; height: 430px; }
+#map { width: 100%; height: 100%; display: block; cursor: crosshair; }
+#mapinfo { position: absolute; left: 6px; bottom: 4px; color: var(--muted); pointer-events: none; }
+.banner { grid-column: 1 / -1; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); display: none; }
+.banner.show { display: flex; gap: 10px; align-items: center; }
+.banner.err { border-color: var(--crit); }
+.spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--s-actual); border-radius: 50%; animation: sp 1s linear infinite; flex: none; }
+@keyframes sp { to { transform: rotate(360deg); } }
+#state { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: var(--surface-2);
+  border-left: 5px solid var(--muted); margin-bottom: 10px; }
+#state b { font-size: 17px; letter-spacing: .04em; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 520px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.tile .k { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tile .v small { font-size: 12px; font-weight: 400; color: var(--text-2); margin-left: 3px; }
+.tile .x { color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inputs { display: grid; grid-template-columns: 78px 1fr 62px; gap: 6px 10px; align-items: center; margin-top: 12px; }
+.bar { position: relative; height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.bar i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.bar .mid { left: 50%; width: 1px; background: var(--muted); }
+.num { font-variant-numeric: tabular-nums; text-align: right; color: var(--text-2); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; color: var(--text-2); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+.sw.dash { border-top-style: dashed; }
+.sw.band { height: 10px; border: 0; background: var(--drift-band); outline: 1px solid rgba(217,89,38,.5); }
+.chart { position: relative; margin-top: 6px; }
+.chart canvas { width: 100%; height: 118px; display: block; }
+.chart .t { position: absolute; left: 44px; top: 0; color: var(--text-2); font-size: 11px; pointer-events: none; }
+#tip { position: fixed; z-index: 20; pointer-events: none; background: #0b0b0b; border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#tip .r { display: flex; gap: 8px; align-items: center; } #tip .r b { margin-left: auto; padding-left: 12px; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: right; color: var(--muted); font-weight: 500; font-size: 11px; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+tr.sel td { background: rgba(217, 89, 38, .12); }
+tr.best td:nth-child(2) { font-weight: 700; }
+tbody tr.lap { cursor: pointer; } tbody tr.lap:hover td { background: var(--surface-2); }
+.scroll { overflow: auto; max-height: 300px; }
+a { color: #86b6ef; }
+.seg td, .seg th { text-align: left; padding: 3px 4px; }
+.seg input[type=number] { width: 62px; } .seg input[type=text] { width: 84px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
+.row label { color: var(--text-2); display: inline-flex; gap: 6px; align-items: center; }
+input[type=range] { accent-color: #3987e5; width: 170px; }
+details { margin-top: 8px; } summary { cursor: pointer; color: var(--text-2); }
+.wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px 10px; margin: 8px 0; }
+.wgrid label { display: flex; justify-content: space-between; align-items: center; gap: 6px; color: var(--text-2); }
+.warnbox { border-left: 3px solid var(--warn); background: var(--surface-2); padding: 6px 10px; border-radius: 4px; margin-top: 8px; color: var(--text-2); }
+#toast { position: fixed; right: 16px; bottom: 16px; z-index: 30; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+#toast div { background: #0b0b0b; border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 6px; padding: 8px 12px; max-width: 460px; }
+#toast div.bad { border-left-color: var(--crit); }
+#events { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; max-height: 260px; overflow: auto; }
+#events div { padding: 2px 0; border-bottom: 1px solid var(--grid); display: flex; gap: 8px; }
+#events .tm { color: var(--muted); flex: none; width: 52px; text-align: right; }
+#events .kd { color: var(--text-2); flex: none; width: 78px; }
+#events .warn .ms::before { content: "⚠ "; color: var(--warn); }
+#events .error .ms::before { content: "✖ "; color: var(--crit); }
+.empty { color: var(--muted); padding: 14px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>acopt</h1>
+  <span class="sub" id="what">connecting…</span>
+  <span class="pill" id="envpill" title="Where the controller's commands go"><span class="dot" id="conn"></span><span id="envtxt">–</span></span>
+  <span class="pill" id="phase">–</span>
+  <span class="spacer"></span>
+  <div class="ctl">
+    <label>Laps <input type="number" id="laps" min="1" max="1000" value="3"></label>
+    <label id="pacewrap" title="Simulator speed relative to real time">Sim speed
+      <select id="pace"><option value="1">1× real time</option><option value="2">2×</option><option value="0.5">0.5×</option><option value="0">max</option></select></label>
+    <label title="After each clean lap, update the grip map and re-plan the line"><input type="checkbox" id="learn"> Learn between laps</label>
+    <button class="primary" id="start">Start</button>
+    <button id="pause">Pause</button>
+    <button class="danger" id="stop">Stop</button>
+  </div>
+</header>
+
+<main>
+  <div class="banner" id="banner"><span class="spin" id="bspin"></span><span id="btext"></span></div>
+
+  <div class="col">
+  <section class="card">
+    <h2>Track <span class="hint" id="trackhint"></span>
+      <span class="legend" style="margin-left:auto">
+        <span><i class="sw dash" style="border-color:var(--ref)"></i>reference line</span>
+        <span><i class="sw" style="border-color:var(--s-compare);border-top-width:4px"></i>drift segment</span>
+        <span><i class="sw" style="border-color:var(--s-actual)"></i>driven</span>
+        <span><i class="sw" style="border-color:var(--s-plan)"></i>MPC plan</span>
+      </span></h2>
+    <div id="mapwrap"><canvas id="map"></canvas><div id="mapinfo"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>This lap over distance
+      <span class="legend" style="margin-left:auto">
+        <span><i class="sw dash" style="border-color:var(--ref)"></i>reference</span>
+        <span><i class="sw" style="border-color:var(--s-actual)"></i>current lap</span>
+        <span><i class="sw" style="border-color:var(--s-compare)"></i>compare:
+          <select id="cmp"><option value="">none</option></select></span>
+        <span><i class="sw band"></i>drift segment</span>
+      </span></h2>
+    <div class="chart"><div class="t">Speed (km/h)</div><canvas id="c_v"></canvas></div>
+    <div class="chart"><div class="t">Sideslip (°)</div><canvas id="c_b"></canvas></div>
+    <div class="chart"><div class="t">Distance from reference line (m)</div><canvas id="c_n"></canvas></div>
+    <div class="chart"><div class="t">Throttle (+) / brake (−) (%)</div><canvas id="c_T"></canvas></div>
+    <div class="chart"><div class="t">Steering, road wheel (°)</div><canvas id="c_d"></canvas></div>
+  </section>
+
+  <section class="card">
+    <h2>Laps <span class="hint">click a lap to compare it in the charts</span>
+      <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400"><a href="/api/session.json" id="dl_sess">session.json</a></span></h2>
+    <div class="chart" id="trendwrap" style="display:none"><div class="t">Lap time (s) — driven vs. optimiser prediction</div><canvas id="c_trend" style="height:120px"></canvas>
+      <div class="legend" style="margin:2px 0 8px 44px"><span><i class="sw" style="border-color:var(--s-actual)"></i>driven</span><span><i class="sw dash" style="border-color:var(--s-plan)"></i>predicted by the plan</span></div></div>
+    <div class="scroll"><table><thead><tr>
+      <th>Lap</th><th>Time</th><th title="Driven minus predicted lap time">vs plan</th><th>Top km/h</th>
+      <th title="RMS distance from the reference line outside drift segments">Line err m</th>
+      <th title="RMS sideslip error inside drift segments">Drift err °</th>
+      <th title="Supervisor interventions (left normal MPC mode)">Interv.</th>
+      <th title="Median / 95th percentile MPC solve time">Solve ms</th><th>Grip</th><th>Data</th></tr></thead>
+      <tbody id="lapsbody"></tbody></table>
+      <div class="empty" id="nolaps">No laps yet. Press Start.</div></div>
+    <div class="muted" style="margin-top:8px">Logs: <span id="logdir">–</span></div>
+  </section>
+  </div>
+  <div class="col">
+  <section class="card">
+    <h2>Live</h2>
+    <div id="state"><b id="statename">–</b><span class="sub" id="statedesc">not running</span></div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Speed</div><div class="v"><span id="t_v">–</span><small>km/h</small></div><div class="x">target <span id="t_vref">–</span></div></div>
+      <div class="tile"><div class="k">Sideslip</div><div class="v"><span id="t_b">–</span><small>°</small></div><div class="x">target <span id="t_bref">–</span>°</div></div>
+      <div class="tile"><div class="k">Off reference line</div><div class="v"><span id="t_n">–</span><small>m</small></div><div class="x" id="t_mode">race line</div></div>
+      <div class="tile" title="Online grip estimate relative to the plan (1.00 = as planned)"><div class="k">Grip vs plan</div><div class="v"><span id="t_mu">–</span></div><div class="x">MPC solve <span id="t_ms">–</span> ms</div></div>
+      <div class="tile"><div class="k">Current lap</div><div class="v"><span id="t_lap">–</span></div><div class="x">lap <span id="t_lapno">–</span> · <span id="t_s">–</span> m</div></div>
+      <div class="tile"><div class="k">Last lap</div><div class="v"><span id="t_last">–</span></div><div class="x" id="t_lastd">&nbsp;</div></div>
+      <div class="tile"><div class="k">Best lap</div><div class="v"><span id="t_best">–</span></div><div class="x" id="t_bestn">&nbsp;</div></div>
+      <div class="tile" title="Lap time the optimiser predicts for the current line"><div class="k">Planned lap</div><div class="v"><span id="t_plan">–</span></div><div class="x">optimiser prediction</div></div>
+    </div>
+    <div class="inputs">
+      <span class="sub">Steering</span><div class="bar"><i class="mid"></i><i id="b_st" style="background:var(--s-actual)"></i></div><span class="num" id="n_st">–</span>
+      <span class="sub">Throttle</span><div class="bar"><i id="b_th" style="left:0;background:var(--good)"></i></div><span class="num" id="n_th">–</span>
+      <span class="sub">Brake</span><div class="bar"><i id="b_br" style="left:0;background:var(--crit)"></i></div><span class="num" id="n_br">–</span>
+    </div>
+    <div class="row" id="kickrow" style="display:none">
+      <span class="sub" title="Adds a sudden yaw rate to the simulated car, like a hit or a patch of oil">Test recovery (simulator):</span>
+      <button class="small" data-kick="1.2">Nudge</button>
+      <button class="small" data-kick="3.5">Spin the car</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tuning <span class="hint">applies while driving</span></h2>
+    <div class="row">
+      <label title="Scales every speed target. Lower it if the car runs wide.">Speed scale
+        <input type="range" id="ss" min="0.6" max="1.05" step="0.01" value="1"></label>
+      <b id="ssv" class="num">–</b>
+    </div>
+    <div class="sub" style="margin:10px 0 4px">Segments <span class="muted">— hold a drift angle, or change speed, over part of the lap</span></div>
+    <div class="scroll" style="max-height:230px">
+    <table class="seg"><thead><tr><th>Name</th><th>Mode</th><th>From m</th><th>To m</th><th>Angle °</th><th>Speed ×</th><th></th></tr></thead>
+      <tbody id="segs"></tbody>
+      <tfoot><tr>
+        <td><input type="text" id="ns_name" placeholder="name"></td>
+        <td><select id="ns_mode"><option>drift</option><option>race</option></select></td>
+        <td><input type="number" id="ns_a" step="5"></td><td><input type="number" id="ns_b" step="5"></td>
+        <td><input type="number" id="ns_beta" value="15" step="1" min="0" max="60"></td>
+        <td><input type="number" id="ns_sp" value="1" step="0.01" min="0.3" max="1.2"></td>
+        <td><button class="small" id="ns_add">Add</button></td></tr></tfoot>
+    </table></div>
+    <div class="row"><label>Fill from corner <select id="corner"><option value="">choose…</option></select></label>
+      <span class="muted">or hover the map to read distances</span></div>
+    <div id="pwarn"></div>
+    <details><summary>Controller weights</summary>
+      <div class="sub" style="margin-top:6px">Race mode</div><div class="wgrid" id="w_race"></div>
+      <div class="sub">Drift mode</div><div class="wgrid" id="w_drift"></div>
+      <button class="small" id="w_apply">Apply weights</button>
+    </details>
+    <div class="row" style="margin-top:12px">
+      <button class="small" id="p_save" title="Write the current tuning to the profile YAML">Save profile to file</button>
+      <button class="small" id="p_load" title="Discard unsaved changes and re-read the profile YAML">Reload from file</button>
+      <span class="muted" id="ppath"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Events</h2>
+    <div id="events"><div class="empty">Nothing yet.</div></div>
+  </section>
+  </div>
+</main>
+<div id="tip"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { actual: css('--s-actual'), compare: css('--s-compare'), plan: css('--s-plan'), ref: css('--ref'),
+  grid: css('--grid'), line: css('--line'), muted: css('--muted'), text2: css('--text-2'), text: css('--text'),
+  surface: css('--surface'), surface2: css('--surface-2'), band: css('--drift-band') };
+const STATE = {
+  MPC:       ['var(--good)',    'Normal — optimal control active'],
+  MPC_SAFE:  ['var(--warn)',    'Caution — reduced grip assumption after an excursion'],
+  FALLBACK:  ['var(--serious)', 'Fallback — simple path follower (solver unavailable)'],
+  SAFE_STOP: ['var(--crit)',    'Safe stop — braking in a straight line'],
+  RECOVER:   ['var(--serious)', 'Recovering — creeping back to the line'],
+  PAUSED:    ['var(--muted)',   'Paused — braking, wheel straight'],
+};
+const fmt = (v, d = 1) => (v == null || !isFinite(v)) ? '–' : Number(v).toFixed(d);
+const fmtLap = t => { if (t == null || !isFinite(t)) return '–'; const m = Math.floor(t / 60); return (m ? m + ':' + (t - 60 * m).toFixed(3).padStart(6, '0') : t.toFixed(3)); };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+let ST = null, REF = null, F = {}, since = 0, evSince = 0, last = null, S = null;
+let cur = [], curLap = -1, cmpLap = '', cmpTrace = null, hoverS = null, laps = [];
+let profVer = -1, editing = false, lastOk = 0, events = [];
+
+function toast(msg, bad) {
+  const d = document.createElement('div'); d.textContent = msg; if (bad) d.className = 'bad';
+  $('toast').appendChild(d); setTimeout(() => d.remove(), bad ? 7000 : 2600);
+}
+async function api(path) { const r = await fetch(path, { cache: 'no-store' }); return r.json(); }
+async function cmd(c, quiet) {
+  try {
+    const r = await (await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) })).json();
+    if (!r.ok) toast(r.error || 'Command failed', true);
+    else if (!quiet) toast(r.warnings && r.warnings.length ? 'Applied, with a warning: ' + r.warnings[0] : 'Applied');
+    return r;
+  } catch (e) { toast('No connection to the controller', true); return { ok: false }; }
+}
+
+/* ---------- canvas helpers ---------- */
+function fit(cv) {
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  const w = Math.max(10, Math.round(r.width * d)), h = Math.max(10, Math.round(r.height * d));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); return [g, r.width, r.height];
+}
+function niceTicks(lo, hi, n) {
+  const span = hi - lo || 1, raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw) || raw, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.abs(v) < 1e-9 ? 0 : v);
+  return out;
+}
+function lookup(xs, ys, x) {      // linear interpolation on sorted xs; null outside
+  if (!xs || !xs.length || x < xs[0] || x > xs[xs.length - 1]) return null;
+  let a = 0, b = xs.length - 1;
+  while (b - a > 1) { const m = (a + b) >> 1; if (xs[m] <= x) a = m; else b = m; }
+  const t = (x - xs[a]) / ((xs[b] - xs[a]) || 1); return ys[a] + t * (ys[b] - ys[a]);
+}
+
+/* ---------- distance charts ---------- */
+const PAD = { l: 44, r: 10, t: 16, b: 18 };
+const charts = [
+  { id: 'c_v', key: 'v', refKey: 'v', d: 0, zero: false },
+  { id: 'c_b', key: 'beta', refKey: 'beta', d: 1, zero: true },
+  { id: 'c_n', key: 'n_err', refKey: null, d: 2, zero: true, sym: 1.0 },
+  { id: 'c_T', key: 'T', refKey: 'T', d: 0, zero: true, fixed: [-105, 105] },
+  { id: 'c_d', key: 'steer', refKey: 'steer', d: 1, zero: true },
+];
+function seriesFor(ch) {
+  const out = [];
+  if (REF && ch.refKey) out.push({ name: 'reference', color: C.ref, dash: [5, 4], w: 1.5, xs: REF.s, ys: REF[ch.refKey] });
+  if (ch.key === 'n_err' && REF) out.push({ name: 'reference', color: C.ref, dash: [5, 4], w: 1.5, xs: [0, ST.length], ys: [0, 0] });
+  if (cmpTrace && cmpTrace.s.length) out.push({ name: 'lap ' + cmpLap, color: C.compare, w: 1.5, xs: cmpTrace.s, ys: cmpTrace[ch.key] });
+  if (cur.length) out.push({ name: 'current lap', color: C.actual, w: 2, xs: cur.map(r => r[F.s]),
+    ys: cur.map(r => ch.key === 'T' ? 100 * r[F.T] : r[F[ch.key]]), unsorted: true });
+  return out;
+}
+function drawChart(ch) {
+  const cv = $(ch.id), [g, W, H] = fit(cv); g.clearRect(0, 0, W, H);
+  if (!ST) return;
+  const L = ST.length, x0 = PAD.l, x1 = W - PAD.r, y0 = PAD.t, y1 = H - PAD.b;
+  const sx = s => x0 + (s / L) * (x1 - x0);
+  const ser = seriesFor(ch);
+  let lo = Infinity, hi = -Infinity;
+  for (const s of ser) for (const v of s.ys) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+  if (ch.sym) { const m = Math.max(ch.sym, Math.abs(lo), Math.abs(hi)); lo = -m; hi = m; }
+  if (ch.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (ch.fixed) [lo, hi] = ch.fixed; else { const p = (hi - lo) * 0.08 || 1; lo -= p; hi += p; }
+  const sy = v => y1 - (v - lo) / (hi - lo) * (y1 - y0);
+  // drift bands (mode > 0.5)
+  if (REF) { g.fillStyle = C.band; let a = null;
+    for (let i = 0; i <= REF.s.length; i++) { const on = i < REF.s.length && REF.mode[i] > 0.5;
+      if (on && a === null) a = REF.s[i];
+      if (!on && a !== null) { g.fillRect(sx(a), y0, sx(REF.s[i - 1]) - sx(a), y1 - y0); a = null; } } }
+  g.font = '10px system-ui, sans-serif'; g.textBaseline = 'middle'; g.lineWidth = 1;
+  for (const t of niceTicks(lo, hi, 4)) { const y = Math.round(sy(t)) + .5;
+    g.strokeStyle = (t === 0 && ch.zero) ? C.line : C.grid; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+    g.fillStyle = C.muted; g.textAlign = 'right'; g.fillText(String(+t.toFixed(2)), x0 - 6, y); }
+  g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = C.muted;
+  for (const t of niceTicks(0, L, 8)) { g.textAlign = t === 0 ? 'left' : 'center'; g.fillText(t + ' m', sx(t), y1 + 4); }
+  g.save(); g.beginPath(); g.rect(x0, y0 - 2, x1 - x0, y1 - y0 + 4); g.clip();
+  for (const s of ser) { g.strokeStyle = s.color; g.lineWidth = s.w; g.setLineDash(s.dash || []); g.lineJoin = 'round'; g.beginPath();
+    let prev = null;
+    for (let i = 0; i < s.xs.length; i++) { const X = sx(s.xs[i]), Y = sy(s.ys[i]);
+      if (prev === null || Math.abs(s.xs[i] - prev) > L / 2) g.moveTo(X, Y); else g.lineTo(X, Y); prev = s.xs[i]; }
+    g.stroke(); }
+  g.setLineDash([]);
+  if (hoverS != null) { const X = Math.round(sx(hoverS)) + .5; g.strokeStyle = C.muted; g.lineWidth = 1; g.beginPath(); g.moveTo(X, y0); g.lineTo(X, y1); g.stroke();
+    for (const s of ser) { const v = valAt(s, hoverS); if (v == null) continue;
+      g.fillStyle = s.color; g.strokeStyle = C.surface; g.lineWidth = 2; g.beginPath(); g.arc(sx(hoverS), sy(v), 4, 0, 7); g.fill(); g.stroke(); } }
+  g.restore();
+  ch._sx = sx; ch._x0 = x0; ch._x1 = x1; ch._ser = ser;
+}
+function valAt(s, x) {
+  if (!s.unsorted) return lookup(s.xs, s.ys, x);
+  let best = null, bd = 6;       // current lap is in time order: nearest sample within 6 m
+  for (let i = 0; i < s.xs.length; i++) { const d = Math.abs(s.xs[i] - x); if (d < bd) { bd = d; best = s.ys[i]; } }
+  return best;
+}
+function drawCharts() { charts.forEach(drawChart); }
+function showTip(ev, rows, title) {
+  const tip = $('tip');
+  tip.innerHTML = `<div class="muted">${esc(title)}</div>` + rows.map(r =>
+    `<div class="r"><i class="sw${r.dash ? ' dash' : ''}" style="border-color:${r.color}"></i>${esc(r.name)}<b>${r.val}</b></div>`).join('');
+  tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, ev.clientX + 14) + 'px';
+  tip.style.top = Math.max(8, ev.clientY - h - 10) + 'px';
+}
+charts.forEach(ch => {
+  const cv = $(ch.id);
+  cv.addEventListener('mousemove', ev => {
+    if (!ch._sx) return; const r = cv.getBoundingClientRect(), x = ev.clientX - r.left;
+    const s = Math.max(0, Math.min(ST.length, (x - ch._x0) / (ch._x1 - ch._x0) * ST.length)); hoverS = s;
+    const rows = ch._ser.map(se => ({ name: se.name, color: se.color, dash: !!se.dash, val: fmt(valAt(se, s), ch.d) })).filter(r => r.val !== '–');
+    showTip(ev, rows, `at ${s.toFixed(0)} m`); drawCharts(); drawMap();
+  });
+  cv.addEventListener('mouseleave', () => { hoverS = null; $('tip').style.display = 'none'; drawCharts(); drawMap(); });
+});
+
+/* ---------- lap-time trend ---------- */
+function drawTrend() {
+  const done = laps.filter(l => l.complete); $('trendwrap').style.display = done.length >= 2 ? '' : 'none';
+  if (done.length < 2) return;
+  const cv = $('c_trend'), [g, W, H] = fit(cv); g.clearRect(0, 0, W, H);
+  const x0 = PAD.l, x1 = W - PAD.r - 46, y0 = PAD.t + 4, y1 = H - PAD.b;
+  const ys = done.flatMap(l => [l.lap_time, l.plan_time]).filter(v => v != null);
+  let lo = Math.min(...ys), hi = Math.max(...ys); const p = (hi - lo) * 0.15 || 0.5; lo -= p; hi += p;
+  const sx = i => x0 + (done.length === 1 ? .5 : i / (done.length - 1)) * (x1 - x0), sy = v => y1 - (v - lo) / (hi - lo) * (y1 - y0);
+  g.font = '10px system-ui, sans-serif'; g.lineWidth = 1;
+  for (const t of niceTicks(lo, hi, 3)) { const y = Math.round(sy(t)) + .5; g.strokeStyle = C.grid; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+    g.fillStyle = C.muted; g.textAlign = 'right'; g.textBaseline = 'middle'; g.fillText(t.toFixed(2), x0 - 6, y); }
+  g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = C.muted;
+  const every = Math.ceil(done.length / 12);
+  done.forEach((l, i) => { if (i % every === 0) g.fillText('lap ' + l.lap, sx(i), y1 + 4); });
+  const line = (key, color, dash, w) => { g.strokeStyle = color; g.setLineDash(dash); g.lineWidth = w; g.beginPath();
+    done.forEach((l, i) => { if (l[key] == null) return; i ? g.lineTo(sx(i), sy(l[key])) : g.moveTo(sx(i), sy(l[key])); }); g.stroke(); g.setLineDash([]); };
+  line('plan_time', C.plan, [5, 4], 1.5); line('lap_time', C.actual, [], 2);
+  done.forEach((l, i) => { g.fillStyle = C.actual; g.strokeStyle = C.surface; g.lineWidth = 2; g.beginPath(); g.arc(sx(i), sy(l.lap_time), 4, 0, 7); g.fill(); g.stroke(); });
+  const e = done[done.length - 1]; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = C.text2;
+  g.fillText(e.lap_time.toFixed(2), x1 + 8, sy(e.lap_time)); if (e.plan_time != null && Math.abs(sy(e.plan_time) - sy(e.lap_time)) > 11) g.fillText(e.plan_time.toFixed(2), x1 + 8, sy(e.plan_time));
+}
+
+/* ---------- map ---------- */
+let MT = null;
+function mapTransform(W, H) {
+  const xs = ST.left[0].concat(ST.right[0]), ys = ST.left[1].concat(ST.right[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const k = Math.min((W - 30) / (maxx - minx), (H - 30) / (maxy - miny));
+  const ox = (W - k * (maxx - minx)) / 2 - k * minx, oy = (H + k * (maxy - miny)) / 2 + k * miny;
+  return { k, x: X => ox + k * X, y: Y => oy - k * Y, ix: px => (px - ox) / k, iy: py => (oy - py) / k };
+}
+function drawMap() {
+  const cv = $('map'), [g, W, H] = fit(cv); g.clearRect(0, 0, W, H);
+  if (!ST) return;
+  const T = MT = mapTransform(W, H);
+  const path = (xs, ys, close) => { g.beginPath(); for (let i = 0; i < xs.length; i++) i ? g.lineTo(T.x(xs[i]), T.y(ys[i])) : g.moveTo(T.x(xs[i]), T.y(ys[i])); if (close) g.closePath(); };
+  // tarmac: outer ring minus inner ring
+  g.beginPath();
+  for (const side of [ST.left, ST.right]) { for (let i = 0; i < side[0].length; i++) i ? g.lineTo(T.x(side[0][i]), T.y(side[1][i])) : g.moveTo(T.x(side[0][i]), T.y(side[1][i])); g.closePath(); }
+  g.fillStyle = '#2b2b29'; g.fill('evenodd');
+  g.strokeStyle = '#55554f'; g.lineWidth = 1; path(ST.left[0], ST.left[1], true); g.stroke(); path(ST.right[0], ST.right[1], true); g.stroke();
+  // start/finish
+  g.strokeStyle = C.text; g.lineWidth = 2; g.beginPath(); g.moveTo(T.x(ST.left[0][0]), T.y(ST.left[1][0])); g.lineTo(T.x(ST.right[0][0]), T.y(ST.right[1][0])); g.stroke();
+  // corner labels on the outside of each corner
+  g.font = '10px system-ui, sans-serif'; g.fillStyle = C.muted; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const c of ST.corners) { const i = nearestIdx(ST.s, c.s_apex), o = c.dir === 'left' ? ST.right : ST.left, n = c.dir === 'left' ? ST.left : ST.right;
+    const dx = o[0][i] - n[0][i], dy = o[1][i] - n[1][i], d = Math.hypot(dx, dy) || 1;
+    g.fillText(c.name, T.x(o[0][i] + dx / d * 9 / T.k * 1.3), T.y(o[1][i] + dy / d * 9 / T.k * 1.3)); }
+  if (REF) {
+    g.strokeStyle = C.ref; g.lineWidth = 1; g.setLineDash([5, 4]); path(REF.X, REF.Y, true); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = C.compare; g.lineWidth = 4; g.lineCap = 'round'; g.globalAlpha = .75; g.beginPath(); let on = false;
+    for (let i = 0; i < REF.s.length; i++) { if (REF.mode[i] > 0.5) { on ? g.lineTo(T.x(REF.X[i]), T.y(REF.Y[i])) : g.moveTo(T.x(REF.X[i]), T.y(REF.Y[i])); on = true; } else on = false; }
+    g.stroke(); g.globalAlpha = 1; g.lineCap = 'butt';
+  }
+  if (cur.length > 1) { g.strokeStyle = C.actual; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
+    cur.forEach((r, i) => i ? g.lineTo(T.x(r[F.X]), T.y(r[F.Y])) : g.moveTo(T.x(r[F.X]), T.y(r[F.Y]))); g.stroke(); }
+  if (S && S.horizon && S.running) { g.strokeStyle = C.plan; g.lineWidth = 2.5; path(S.horizon[0], S.horizon[1]); g.stroke(); }
+  if (hoverS != null && REF) { const i = nearestIdx(REF.s, hoverS); g.strokeStyle = C.text; g.lineWidth = 2; g.beginPath(); g.arc(T.x(REF.X[i]), T.y(REF.Y[i]), 6, 0, 7); g.stroke(); }
+  if (last) { const x = T.x(last[F.X]), y = T.y(last[F.Y]), a = -last[F.psi], len = Math.max(ST.car_len * T.k, 17), wd = Math.max(ST.car_width * T.k, 9);
+    g.save(); g.translate(x, y); g.rotate(a);
+    g.fillStyle = STATE[last[F.state]] ? cssVar(STATE[last[F.state]][0]) : C.text; g.strokeStyle = '#0b0b0b'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(len / 2, 0); g.lineTo(-len / 2, wd / 2); g.lineTo(-len / 3, 0); g.lineTo(-len / 2, -wd / 2); g.closePath(); g.fill(); g.stroke(); g.restore(); }
+}
+const cssVar = v => v.startsWith('var(') ? css(v.slice(4, -1)) : v;
+function nearestIdx(xs, x) { let b = 0, bd = Infinity; for (let i = 0; i < xs.length; i++) { const d = Math.abs(xs[i] - x); if (d < bd) { bd = d; b = i; } } return b; }
+$('map').addEventListener('mousemove', ev => {
+  if (!MT || !REF) return; const r = $('map').getBoundingClientRect(), X = MT.ix(ev.clientX - r.left), Y = MT.iy(ev.clientY - r.top);
+  let b = 0, bd = Infinity; for (let i = 0; i < REF.s.length; i++) { const d = (REF.X[i] - X) ** 2 + (REF.Y[i] - Y) ** 2; if (d < bd) { bd = d; b = i; } }
+  if (bd > 30 * 30) { hoverS = null; $('mapinfo').textContent = ''; } else { hoverS = REF.s[b]; $('mapinfo').textContent = `${REF.s[b].toFixed(0)} m from the start line · target ${REF.v[b].toFixed(0)} km/h`; }
+  drawMap(); drawCharts();
+});
+$('map').addEventListener('mouseleave', () => { hoverS = null; $('mapinfo').textContent = ''; drawMap(); drawCharts(); });
+
+/* ---------- panels ---------- */
+function renderLive() {
+  const run = S && S.running, st = last && run ? last[F.state] : null, info = STATE[st];
+  $('statename').textContent = st ? st.replace('_', ' ') : (S && S.ready ? 'IDLE' : '–');
+  $('statedesc').textContent = info ? info[1] : (S && S.ready ? 'Press Start to drive' : 'loading');
+  $('state').style.borderLeftColor = info ? cssVar(info[0]) : C.muted;
+  if (last) {
+    $('t_v').textContent = fmt(last[F.v], 0); $('t_vref').textContent = fmt(last[F.v_ref], 0);
+    $('t_b').textContent = fmt(last[F.beta], 1); $('t_bref').textContent = fmt(last[F.beta_ref], 1);
+    $('t_n').textContent = fmt(last[F.n_err], 2); $('t_mode').textContent = last[F.mode] > 0.5 ? 'drift segment' : 'race line';
+    $('t_mu').textContent = fmt(last[F.mu_hat], 2); $('t_ms').textContent = last[F.solve_ms] >= 0 ? fmt(last[F.solve_ms], 0) : '–';
+    $('t_lap').textContent = fmtLap(last[F.lap_t]); $('t_lapno').textContent = last[F.lap]; $('t_s').textContent = fmt(last[F.s], 0);
+    const st_ = last[F.steer] / ST.delta_max_deg, T = last[F.T];   // +steer = left
+    $('b_st').style.left = (st_ > 0 ? 50 - 50 * Math.min(1, st_) : 50) + '%'; $('b_st').style.width = 50 * Math.min(1, Math.abs(st_)) + '%';
+    $('n_st').textContent = (Math.abs(last[F.steer]) < 0.05 ? '0.0°' : Math.abs(last[F.steer]).toFixed(1) + '° ' + (st_ > 0 ? 'L' : 'R'));
+    $('b_th').style.width = 100 * Math.max(0, T) + '%'; $('n_th').textContent = (100 * Math.max(0, T)).toFixed(0) + '%';
+    $('b_br').style.width = 100 * Math.max(0, -T) + '%'; $('n_br').textContent = (100 * Math.max(0, -T)).toFixed(0) + '%';
+  }
+  const done = laps.filter(l => l.complete), lastLap = laps[laps.length - 1];
+  $('t_last').textContent = lastLap ? fmtLap(lastLap.lap_time) : '–';
+  $('t_lastd').textContent = lastLap && lastLap.plan_time != null ? ((lastLap.lap_time - lastLap.plan_time >= 0 ? '+' : '') + (lastLap.lap_time - lastLap.plan_time).toFixed(2) + ' s vs plan') : ' ';
+  const best = done.length ? done.reduce((a, b) => a.lap_time <= b.lap_time ? a : b) : null;
+  $('t_best').textContent = best ? fmtLap(best.lap_time) : '–'; $('t_bestn').textContent = best ? 'lap ' + best.lap : ' ';
+  $('t_plan').textContent = S && S.plan_time ? fmtLap(S.plan_time) : '–';
+}
+function renderHeader() {
+  if (!S) return;
+  const ok = performance.now() - lastOk < 1500;
+  $('conn').style.background = ok ? css('--good') : css('--crit');
+  if (ST) { $('what').textContent = `${ST.car} · ${ST.track} · ${ST.length.toFixed(0)} m`;
+    $('envtxt').textContent = !ok ? 'controller offline' : ({ sim: 'Simulator', ac: 'Assetto Corsa', ac_mock: 'Simulator via AC interface' }[ST.env] || ST.env); }
+  $('phase').textContent = S.phase + (S.phase_msg ? ' — ' + S.phase_msg : '');
+  const ready = !!S.ready, run = !!S.running;
+  $('start').disabled = !ready || run; $('stop').disabled = !run; $('pause').disabled = !run;
+  $('pause').textContent = S.paused ? 'Resume' : 'Pause';
+  const b = $('banner');
+  if (S.error) { b.className = 'banner show err'; $('bspin').style.display = 'none'; $('btext').textContent = 'Could not start: ' + S.error; }
+  else if (!ready || S.phase === 'planning' || S.phase === 'waiting') { b.className = 'banner show'; $('bspin').style.display = '';
+    $('btext').textContent = (S.phase_msg || S.phase) + '…'; }
+  else b.className = 'banner';
+  if (document.activeElement !== $('pace') && S.pace != null) { const o = [...$('pace').options].find(o => +o.value === +S.pace); if (o) $('pace').value = o.value; }
+  if (document.activeElement !== $('learn') && S.learning != null) $('learn').checked = S.learning;
+  $('logdir').textContent = S.log_dir || '–';
+}
+function renderLaps() {
+  const done = laps.filter(l => l.complete), bestT = done.length ? Math.min(...done.map(l => l.lap_time)) : null;
+  $('nolaps').style.display = laps.length ? 'none' : '';
+  $('lapsbody').innerHTML = laps.slice().reverse().map(l => {
+    const d = l.plan_time != null ? l.lap_time - l.plan_time : null;
+    return `<tr class="lap${String(l.lap) === String(cmpLap) ? ' sel' : ''}${l.complete && l.lap_time === bestT ? ' best' : ''}" data-lap="${l.lap}">
+      <td>${l.lap}${l.complete ? '' : ' <span class="muted">(partial)</span>'}${l.complete && l.lap_time === bestT ? ' <span class="muted">best</span>' : ''}</td>
+      <td>${fmtLap(l.lap_time)}</td><td>${d == null ? '–' : (d >= 0 ? '+' : '') + d.toFixed(2)}</td><td>${fmt(l.v_max_kmh, 0)}</td>
+      <td>${fmt(l.n_err_rms_m, 2)}</td><td>${l.drift_beta_err_rms_deg == null ? '–' : fmt(l.drift_beta_err_rms_deg, 2)}</td>
+      <td>${l.interventions ? '⚠ ' + l.interventions : '0'}</td><td>${fmt(l.solve_ms_median, 0)} / ${fmt(l.solve_ms_p95, 0)}</td>
+      <td>${fmt(l.mu_hat_mean, 2)}</td><td><a href="/api/lap.csv?n=${l.lap}" onclick="event.stopPropagation()">CSV</a></td></tr>`; }).join('');
+  const sel = $('cmp'), want = ['<option value="">none</option>'].concat(laps.map(l => `<option value="${l.lap}">lap ${l.lap} (${fmtLap(l.lap_time)})</option>`)).join('');
+  if (sel._html !== want) { sel.innerHTML = want; sel._html = want; sel.value = cmpLap; }
+  drawTrend();
+}
+$('lapsbody').addEventListener('click', ev => { const tr = ev.target.closest('tr.lap'); if (tr) setCompare(String(cmpLap) === tr.dataset.lap ? '' : tr.dataset.lap); });
+$('cmp').addEventListener('change', () => setCompare($('cmp').value));
+async function setCompare(n) {
+  cmpLap = n; cmpTrace = null; $('cmp').value = n;
+  if (n !== '') { const t = await api('/api/lap?n=' + n); if (!t.error) cmpTrace = t; }
+  renderLaps(); drawCharts();
+}
+function renderEvents(newEv) {
+  if (!newEv.length) return; events = events.concat(newEv).slice(-200);
+  const box = $('events'), atTop = box.scrollTop < 8;
+  box.innerHTML = events.slice().reverse().map(e => `<div class="${e.level}"><span class="tm">${e.t.toFixed(1)}s</span><span class="kd">${esc(e.kind)}</span><span class="ms">${esc(e.msg)}</span></div>`).join('');
+  if (atTop) box.scrollTop = 0;
+}
+
+/* ---------- tuning ---------- */
+const WK = { n: 'line', v: 'speed', beta: 'sideslip', r: 'yaw rate', xi: 'heading', ddelta: 'steer smooth', dT: 'pedal smooth' };
+function renderProfile(p) {
+  if (p.version === profVer || editing) return; profVer = p.version;
+  if (document.activeElement !== $('ss')) { $('ss').value = p.speed_scale; } $('ssv').textContent = (+p.speed_scale).toFixed(2) + '×';
+  $('segs').innerHTML = p.segments.length ? p.segments.map(sg => `<tr data-name="${esc(sg.name)}">
+    <td><b>${esc(sg.name)}</b></td>
+    <td><select data-f="mode"><option${sg.mode === 'drift' ? ' selected' : ''}>drift</option><option${sg.mode === 'race' ? ' selected' : ''}>race</option></select></td>
+    <td><input type="number" data-f="s_start" step="5" value="${sg.s_start}"></td><td><input type="number" data-f="s_end" step="5" value="${sg.s_end}"></td>
+    <td><input type="number" data-f="beta_deg" step="1" min="0" max="60" value="${sg.beta_deg ?? 15}"></td>
+    <td><input type="number" data-f="speed_scale" step="0.01" min="0.3" max="1.2" value="${sg.speed_scale ?? 1}"></td>
+    <td style="white-space:nowrap"><button class="small" data-act="apply">Apply</button> <button class="small" data-act="del" title="Remove segment" aria-label="Remove segment ${esc(sg.name)}">✕</button></td></tr>`).join('')
+    : '<tr><td colspan="7" class="muted">No segments: the car follows the race line everywhere.</td></tr>';
+  $('pwarn').innerHTML = p.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('');
+  for (const m of ['race', 'drift']) $('w_' + m).innerHTML = Object.keys(WK).map(k =>
+    `<label>${WK[k]}<input type="number" step="any" min="0" data-m="${m}" data-k="${k}" value="${(p.weights[m] || {})[k] ?? ''}"></label>`).join('');
+}
+document.addEventListener('focusin', ev => { if (ev.target.closest('#segs, #w_race, #w_drift')) editing = true; });
+document.addEventListener('focusout', ev => { if (ev.target.closest('#segs, #w_race, #w_drift')) setTimeout(() => { if (!document.activeElement.closest || !document.activeElement.closest('#segs, #w_race, #w_drift')) { editing = false; } }, 150); });
+$('segs').addEventListener('click', async ev => {
+  const b = ev.target.closest('button'); if (!b) return; const tr = b.closest('tr'), name = tr.dataset.name;
+  if (b.dataset.act === 'del') { editing = false; profVer = -1; await cmd({ cmd: 'remove', name }); return; }
+  const c = { cmd: 'segment', name };
+  tr.querySelectorAll('[data-f]').forEach(el => { c[el.dataset.f] = el.tagName === 'SELECT' ? el.value : parseFloat(el.value); });
+  editing = false; profVer = -1; await cmd(c);
+});
+$('ns_add').addEventListener('click', async () => {
+  const name = $('ns_name').value.trim(); if (!name) return toast('Give the segment a name', true);
+  const a = parseFloat($('ns_a').value), b = parseFloat($('ns_b').value); if (!isFinite(a) || !isFinite(b)) return toast('Enter where the segment starts and ends (metres)', true);
+  const r = await cmd({ cmd: 'segment', name, mode: $('ns_mode').value, s_start: a, s_end: b, beta_deg: parseFloat($('ns_beta').value), speed_scale: parseFloat($('ns_sp').value) });
+  if (r.ok) { $('ns_name').value = ''; $('corner').value = ''; profVer = -1; }
+});
+$('corner').addEventListener('change', () => { const c = ST.corners.find(c => c.name === $('corner').value); if (!c) return;
+  const L = ST.length; $('ns_name').value = c.name; $('ns_a').value = Math.round(((c.s_start - 30) % L + L) % L); $('ns_b').value = Math.round((c.s_end + 20) % L); });
+$('ss').addEventListener('input', () => { $('ssv').textContent = (+$('ss').value).toFixed(2) + '×'; });
+$('ss').addEventListener('change', () => cmd({ cmd: 'speed_scale', value: +$('ss').value }));
+$('w_apply').addEventListener('click', async () => {
+  for (const m of ['race', 'drift']) { const c = { cmd: 'weights', mode: m }; let bad = false;
+    $('w_' + m).querySelectorAll('input').forEach(el => { const v = parseFloat(el.value); if (!isFinite(v) || v < 0) bad = true; c[el.dataset.k] = v; });
+    if (bad) return toast('Weights must be numbers ≥ 0', true);
+    const r = await cmd(c, m === 'race'); if (!r.ok) return; }
+  editing = false; profVer = -1;
+});
+$('p_save').addEventListener('click', async () => { const r = await cmd({ cmd: 'save_profile' }, true); if (r.ok) toast('Profile saved to ' + r.path); });
+$('p_load').addEventListener('click', async () => { editing = false; profVer = -1; const r = await cmd({ cmd: 'load_profile' }, true); if (r.ok) toast('Profile reloaded from file'); });
+
+/* ---------- run controls ---------- */
+$('start').addEventListener('click', () => cmd({ cmd: 'start', laps: +$('laps').value, pace: +$('pace').value, learning: $('learn').checked }, true));
+$('stop').addEventListener('click', () => cmd({ cmd: 'stop' }, true));
+$('pause').addEventListener('click', () => cmd({ cmd: S && S.paused ? 'resume' : 'pause' }, true));
+$('pace').addEventListener('change', () => cmd({ cmd: 'pace', value: +$('pace').value }, true));
+$('learn').addEventListener('change', () => cmd({ cmd: 'learning', value: $('learn').checked }, true));
+document.querySelectorAll('[data-kick]').forEach(b => b.addEventListener('click', () => cmd({ cmd: 'kick', yaw_rate: +b.dataset.kick }, true)));
+
+/* ---------- polling ---------- */
+async function loadStatic() {
+  const s = await api('/api/static'); if (!s.ready) return false;
+  ST = s; s.tick_fields.forEach((k, i) => F[k] = i);
+  $('trackhint').textContent = `${s.corners.length} corners`;
+  $('corner').innerHTML = '<option value="">choose…</option>' + s.corners.map(c => `<option value="${c.name}">${c.name} · ${c.dir} · R ${c.radius} m · ${c.s_start}–${c.s_end} m</option>`).join('');
+  $('ppath').textContent = s.profile_path ? s.profile_path.split(/[\\/]/).slice(-2).join('/') : '';
+  $('p_save').disabled = $('p_load').disabled = !s.profile_path;
+  $('kickrow').style.display = s.can_kick ? '' : 'none'; $('pacewrap').style.display = s.realtime ? 'none' : '';
+  return true;
+}
+async function poll() {
+  try {
+    if (!ST) await loadStatic();
+    const s = await api(`/api/state?since=${since}&ev=${evSince}`); S = s; lastOk = performance.now();
+    if (s.seq < since) { since = 0; evSince = 0; cur = []; events = []; return; }   // controller restarted
+    if (ST && s.ticks) for (const r of s.ticks) {
+      const prev = cur[cur.length - 1];
+      if (r[F.lap] !== curLap || (prev && r[F.lap_t] < prev[F.lap_t] - 0.5)) { cur = []; curLap = r[F.lap]; }
+      cur.push(r); last = r;
+    }
+    since = s.seq; evSince = s.ev_seq; laps = s.laps || [];
+    if (s.profile) { renderProfile(s.profile);
+      if (!REF || REF.version !== s.profile.version) { const r = await api('/api/reference'); if (r.version >= 0) REF = r; } }
+    renderEvents(s.events || []); renderHeader(); renderLive(); renderLaps(); drawMap(); drawCharts();
+  } catch (e) { renderHeader(); }
+}
+let busy = false;
+setInterval(async () => { if (busy || document.hidden) return; busy = true; try { await poll(); } finally { busy = false; } }, 100);
+window.addEventListener('resize', () => { drawMap(); drawCharts(); drawTrend(); });
+</script>
+</body>
+</html>

@@ -5,3 +5,5 @@ pyyaml>=6.0
 matplotlib>=3.7
 # Windows / Assetto Corsa only:
 pyvjoy>=1.0; sys_platform == "win32"
+# tests only:
+pytest>=7.0

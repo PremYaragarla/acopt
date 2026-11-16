@@ -6,7 +6,8 @@ nonlinear MPC, (3) can follow drift profiles (target sideslip per corner) that y
 change **while the car is driving**, and (4) improves the plan lap after lap.
 
 Everything runs against a built-in simulator first, so you can develop and tune
-without the game, then switch one line in the config to drive Assetto Corsa.
+without the game, then point it at an Assetto Corsa config. A web dashboard shows
+what the car is doing, lets you tune it while it drives, and every lap is saved as CSV.
 
 ```
           ┌──────────── offline / between laps ────────────┐
@@ -30,6 +31,54 @@ without the game, then switch one line in the config to drive Assetto Corsa.
                          └─► sysid.py (fit car parameters)
 ```
 
+## Quick start (no game needed)
+
+```bash
+pip install -r requirements.txt
+python scripts/ui.py
+```
+
+This opens the dashboard at `http://127.0.0.1:8765` against the built-in simulator.
+The first start plans the race line (about a minute, cached in `out/` afterwards).
+Press **Start**.
+
+![dashboard](docs/dashboard.png)
+
+What the dashboard does:
+
+- **Track map** with the reference line, drift segments, the driven line, the MPC's
+  current plan and the car (coloured by supervisor state). Hover to read distances.
+- **Live panel**: supervisor state in words, speed / sideslip / line error against
+  their targets, grip estimate, solve time, lap times, steering and pedal bars.
+- **This lap over distance**: speed, sideslip, line error, pedals and steering
+  against the reference, with any finished lap overlaid for comparison.
+- **Tuning while driving**: speed scale, drift/race segments (fill them from the
+  detected corner list), controller weights, save/reload the profile YAML. Invalid
+  input is refused with a message and nothing is applied.
+- **Laps table** with per-lap metrics and CSV download, lap-time trend, `session.json`.
+- **Events**: every supervisor transition (with the reason and where it happened),
+  live commands, warnings, learning updates.
+- Simulator only: sim speed (0.5× to max) and **Nudge / Spin the car** buttons to
+  watch the recovery logic work.
+
+Headless alternative: `python scripts/run.py configs/sim_test.yaml --laps 6`.
+
+## Getting data out
+
+Every session writes to a timestamped folder under the config's `log_dir`
+(e.g. `out/logs_sim/20260101_120000/`; `latest.txt` points at the newest):
+
+| File | Content |
+|---|---|
+| `lapNNN.csv` | one row per control tick (100 Hz): time, position, speeds, sideslip, references, commands, grip estimate, supervisor state, solve time. SI units, radians. Opens in Excel / pandas. |
+| `session.json` | one record per lap (lap time, planned time, top speed, RMS line error, drift-angle error, interventions, solve-time percentiles, time share per supervisor state) plus the profile used. |
+| `partial.csv` | the unfinished lap when a run is stopped or aborts, for diagnosis. |
+| `report.png`, `report.txt` | made by `python scripts/report.py [config] [session_dir]`. |
+
+`scripts/report.py` output for a 5-lap learning session in the simulator:
+
+![report](docs/report.png)
+
 ## What was verified (simulator, this repo)
 
 The sim's "real" car deliberately differs from the controller's model (−6 % tyre
@@ -38,25 +87,40 @@ grip, −8 % downforce, −3 % power, a −8 % grip patch in one sector, 20 ms d
 
 | Test | Result |
 |---|---|
-| Min-lap-time plan, 1.78 km test circuit, 445 stations | converges, ~35–40 s solve (warm re-plans similar) |
-| MPC solve time (N=20, 2 SQP iterations) | ~20 ms median, ~27 ms p95 |
-| Learning from a pessimistic start (μ₀ = 0.85), 7 laps | 35.98 → 34.62 s, monotonic, 0 incidents |
-| Drift profile: right→left transition at 18°, 15° sweeper at ~170 km/h | sideslip error 0.45° RMS, 1.6° max |
-| Live change of drift angle 12° → 18° over UDP mid-session | applied in the next lap, tracked at 1.6° RMS |
+| Min-lap-time plan, 1.78 km test circuit, 445 stations | converges, ~35–45 s solve |
+| MPC solve time (N=20, 2 SQP iterations) | ~20 ms median, ~24 ms p95 |
+| Learning from a pessimistic start (μ₀ = 0.85), 5 laps | 35.80 → 34.84 s, every lap faster, 0 interventions |
+| Drift profile (18° / 18° / 15° segments) | sideslip error ~0.6° RMS inside drift segments |
+| Yaw-rate hit of 3.5 rad/s at speed ("Spin the car") | safe stop → recover → back to normal MPC, lap continues |
+| Standing start | pulls away and reaches normal MPC without leaving the road |
+| Solver made to throw on every call | drives on with the fallback path follower, stays on the road |
+| Game freeze (telemetry stops updating) | detected as stale within 0.1 s, brakes in a straight line |
 
-![drift lap](docs/sim_drift_lap.png)
+`python -m pytest tests` runs all of this (28 tests, about a minute once the line is cached).
 
 Nothing has been run against Assetto Corsa itself — see **Verify on your install**.
+The code that talks to the game (`ac/ac_env.py`) is exercised end to end through
+`ac/mock.py`, which feeds it the simulator using AC's conventions (Y-up world,
+separate heading zero/sign, normalised steering, render-rate position page). That
+proves the plumbing; it cannot prove the struct layouts or signs of a real install.
 
-## Quick start (simulator)
+## What makes it robust
 
-```bash
-pip install -r requirements.txt
-python scripts/run.py configs/sim_test.yaml --laps 6               # race line + learning
-python scripts/run.py configs/sim_test.yaml --laps 2 --no-learn --profile profiles/drift_demo.yaml
-python scripts/plot_lap.py configs/sim_test.yaml out/logs_sim/lap001.npy
-```
-The first run plans the line (~40 s) and caches it in `out/`.
+- **Supervisor** with explicit states and reasons; every transition is logged and shown.
+- **Bad data never reaches the solver**: non-finite or stale telemetry → straight-line braking.
+- **Solver failures are contained**: an exception counts as a failed solve; after failed
+  retries the MPC restarts cold instead of iterating on a broken guess; a plan older
+  than 0.5 s is never executed; the fallback limits throttle at low speed so it cannot
+  spin the car on power.
+- **Recovery ends**: after a stop the old plan is discarded and the car creeps back to
+  the line, then resumes (previously it could loop between fallback and spin).
+- **Live changes are validated** (ranges, required fields, duplicate names, unknown
+  weights) and applied atomically or not at all.
+- **Readable errors** for a missing track file, vJoy not installed, bad YAML, a stale
+  race-line cache from another track, a busy UDP port (warning, not a crash).
+- **Session lifecycle**: runs can be started and stopped repeatedly; controls are
+  always centred on exit; logs never overwrite an earlier session; a failed re-plan
+  or a full disk does not stop the car.
 
 ## Assetto Corsa: Vallelunga Club + F2004
 
@@ -73,10 +137,13 @@ The first run plans the line (~40 s) and caches it in `out/`.
    (straights + left and right corners). It writes `configs/ac_calibration.yaml` and tells
    you the `sign_z` to put in the track config.
 5. **Plan**: `python scripts/plan_line.py configs/vallelunga_club_f2004.yaml` → line + plot.
-6. **Drive**: `python scripts/run.py configs/vallelunga_club_f2004.yaml --laps 10`.
-   Start with `speed_scale: 0.9` in `profiles/race.yaml`; learning raises grip where it can.
+6. **Drive**: `python scripts/ui.py configs/vallelunga_club_f2004.yaml`, get the car on
+   track in a practice session, press **Start** in the dashboard. The controller waits
+   until the game reports a live session. **Stop** (or Ctrl+C) centres the controls.
+   Add `--host 0.0.0.0` to open the dashboard from a tablet on the same network (there
+   is no password, so only on a network you trust). Start with `speed_scale: 0.9` in `profiles/race.yaml`; learning raises grip where it can.
 7. **Identify the car** after a few laps:
-   `python scripts/identify.py configs/vallelunga_club_f2004.yaml out/logs_ac/lap00*.npy --save configs/f2004_id.yaml`,
+   `python scripts/identify.py configs/vallelunga_club_f2004.yaml out/logs_ac/<session>/lap00*.csv --save configs/f2004_id.yaml`,
    point `vehicle:` at the result, delete the cached line, re-plan.
 
 Kunos cars ship encrypted data (`data.acd`), so `configs/f2004.yaml` holds informed
@@ -99,8 +166,9 @@ lock that is about 20–24°: beyond it there is no counter-steer left, so reque
 angles are automatically reduced where needed and reported as warnings rather than
 spinning the car.
 
-Change things while it drives — any of these take effect within one profile rebuild
-(≈0.3–2 s, in a background thread; the controller never stalls):
+Change things while it drives from the dashboard's Tuning panel, or from a terminal —
+any of these take effect within one profile rebuild (a few seconds for a new drift
+angle, in a background thread; the controller never stalls):
 
 ```bash
 python scripts/tune.py drift T3 --beta 22 --start 940 --end 1110   # add/modify a segment
@@ -178,8 +246,11 @@ be tested against the game here:
 
 ```
 acopt/            vehicle, track, planner, drift, profile, mpc, controller,
-                  learning, sysid, live, session, sim, env, ac/(shared_memory, ac_env)
+                  learning, sysid, live, session, sim, env,
+                  telemetry (hub, lap metrics, CSV), dashboard (HTTP API) + web/index.html,
+                  ac/(shared_memory, ac_env, mock)
 configs/          f2004.yaml, vallelunga_club_f2004.yaml, sim_test.yaml, ac_calibration.yaml
 profiles/         race.yaml, drift_demo.yaml
-scripts/          run, plan_line, tune, corners, identify, ac_probe, plot_lap
+scripts/          ui, run, report, plan_line, tune, corners, identify, ac_probe, plot_lap
+tests/            unit + end-to-end simulator tests
 ```

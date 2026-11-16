@@ -145,7 +145,7 @@ class SpatialMPC:
         self.g_fn = ca.Function("gv", [w, par], [ca.vertcat(*g)])
         # acceptable dynamics defect per state: n, xi, vx, vy, r, delta, T
         self.defect_scale = np.array([0.10, 0.02, 0.3, 0.3, 0.05, 0.01, 0.05])
-        self._w0 = None
+        self._w0_store = None
         self._lam_g = self._lam_x = None
         self.last: MPCResult | None = None
 
