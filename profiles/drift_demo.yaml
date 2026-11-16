@@ -1,0 +1,27 @@
+# Race line with drift segments (s in metres from the start/finish line).
+# Use scripts/corners.py to list corner s-ranges for your track.
+# Drift angles that the car cannot hold (steering lock, power) are reduced
+# automatically where needed and reported as warnings.
+speed_scale: 0.97
+segments:
+  - name: T2
+    mode: drift
+    s_start: 740
+    s_end: 930
+    beta_deg: 18
+    line: race          # race | center | metres offset from the race line
+    blend_m: 30
+  - name: T3
+    mode: drift
+    s_start: 940
+    s_end: 1110
+    beta_deg: 18
+    blend_m: 30
+  - name: sweeper
+    mode: drift
+    s_start: 1420
+    s_end: 1720
+    beta_deg: 15
+    blend_m: 40
+weights:
+  drift: {n: 1.5, v: 0.8, beta: 1.5, r: 1.0, xi: 0.0, time: 0.0, ff_delta: 0.01, ff_T: 0.1, ddelta: 5.0, dT: 0.5}

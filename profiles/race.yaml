@@ -1,0 +1,5 @@
+# Pure race line. Edit and save while the controller runs: changes apply live.
+speed_scale: 0.97
+segments: []
+weights:
+  race:  {n: 4.0, v: 1.0, beta: 0.05, r: 0.2, xi: 0.3, time: 0.0, ff_delta: 0.02, ff_T: 0.2, ddelta: 5.0, dT: 0.5}

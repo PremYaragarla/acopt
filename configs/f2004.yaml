@@ -1,0 +1,40 @@
+# Ferrari F2004 (AC: ks_ferrari_f2004) - STARTING ESTIMATES, not AC's internal data.
+# Kunos cars ship encrypted data.acd, so refine these with scripts/identify.py
+# from your own telemetry. Values marked (!) matter most for lap time / drift.
+name: f2004
+
+m: 650.0            # kg, car + driver + ~race fuel (!)
+Iz: 900.0           # kg m^2 yaw inertia
+lf: 1.68            # m, CoG -> front axle (wheelbase ~3.05 m, ~45% front)
+lr: 1.37
+h_cg: 0.28
+car_width: 1.80
+
+rho: 1.20
+ClA: 4.2            # m^2, downforce coeff * area (!)
+CdA: 1.30           # m^2
+aero_bal: 0.45      # front share of downforce
+Crr: 0.012
+
+mu: 1.70            # peak friction (grooved 2004 slicks) (!)
+B_f: 13.0           # Pacejka stiffness -> peak slip ~7.6 deg
+C_f: 1.50
+B_r: 13.0
+C_r: 1.50
+load_sens: 0.08
+sat_k: 8.0
+
+P_max: 650000.0     # W at the wheels (~870 hp) (!)
+F_drive_max: 20000.0
+F_brake_max: 40000.0
+brake_bias: 0.56
+
+# Road-wheel steering limits. In AC: delta_max = STEER_LOCK / STEER_RATIO (car.ini [CONTROLS]).
+# F1 cars have little lock, which caps the drift angle you can hold (~20 deg here). (!)
+delta_max: 0.30     # rad (~17 deg)
+ddelta_max: 1.5     # rad/s
+dT_max: 6.0
+v_min: 4.0
+
+steer_lock_wheel_deg: 180.0   # half lock-to-lock in AC controls
+steer_ratio: 10.5

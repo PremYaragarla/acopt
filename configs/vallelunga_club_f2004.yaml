@@ -1,0 +1,33 @@
+# Assetto Corsa: Vallelunga Club Circuit, Ferrari F2004.
+# Check the layout folder name on your install (content/tracks/vallelunga/*/ai/fast_lane.ai).
+vehicle: configs/f2004.yaml
+track:
+  source: fast_lane_ai
+  path: "C:/Program Files (x86)/Steam/steamapps/common/assettocorsa/content/tracks/vallelunga/club_circuit/ai/fast_lane.ai"
+  sign_z: -1          # verify with scripts/ac_probe.py
+  swap_sides: false   # verify: the probe reports if left/right widths look mirrored
+  half_width: 6.0     # used only if the spline has no width data
+  subsample: 4
+raceline:
+  cache: out/vallelunga_club_f2004.npz
+  ds: 3.0             # short track -> finer stations
+  margin: 0.4         # metres kept off the white lines (tyres-out rule)
+profile: profiles/race.yaml
+mpc: {N: 20, solver: sqp, sqp_iter: 2}
+controller:
+  dt_mpc: 0.05
+  latency_s: 0.04     # include solve time + vJoy/AC input latency
+  tau_delta: 0.02     # identify with scripts/ac_probe.py --step
+  tau_T: 0.03
+  horizon_time: 1.2
+  supervisor: {offtrack_m: 2.0, beta_margin_deg: 15}
+learning:
+  enabled: true
+  mu0: 0.92
+env:
+  type: ac
+  calibration: configs/ac_calibration.yaml
+  vjoy_device: 1
+  # auto_shift: {up_rpm: 18200, down_rpm: 12500}   # or use AC's auto-shifter
+live: {port: 47800, watch_profile: true}
+log_dir: out/logs_ac

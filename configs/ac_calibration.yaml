@@ -1,0 +1,9 @@
+# Frame conventions between AC and the framework. Produced by scripts/ac_probe.py.
+# Defaults are guesses until you run the probe.
+sign_z: -1.0          # our Y = sign_z * AC z
+heading_sign: 1.0     # psi = heading_sign * physics.heading + heading_offset
+heading_offset: 0.0
+yaw_rate_sign: 1.0    # r = yaw_rate_sign * localAngularVel[1]
+steer_sign: 1.0       # +delta (left) -> vJoy axis direction
+brake_gamma: 1.0      # match AC's brake gamma
+stale_s: 0.1

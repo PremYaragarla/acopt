@@ -1,0 +1,29 @@
+# Offline development: built-in test circuit + simulator with deliberately WRONG physics.
+vehicle: configs/f2004.yaml
+track:
+  source: synthetic            # invented ~1.8 km circuit, not Vallelunga
+raceline:
+  cache: out/synthetic_f2004.npz
+  ds: 4.0
+  margin: 0.4
+profile: profiles/race.yaml
+mpc: {N: 20, solver: sqp, sqp_iter: 2}
+controller:
+  dt_mpc: 0.05
+  latency_s: 0.03
+  tau_delta: 0.03
+  tau_T: 0.05
+  horizon_time: 1.2
+learning:
+  enabled: true
+  mu0: 0.85                    # start pessimistic; learning raises it where the car copes
+env:
+  type: sim
+  truth_scale: {mu: 0.94, ClA: 0.92, P_max: 0.97}   # the "real car" differs from the model
+  grip_patch: [740, 930, 0.92]                       # dusty sector the learner must find
+  delay_s: 0.02
+  tau_delta: 0.03
+  tau_T: 0.05
+  noise: 1.0
+live: {port: 47800, watch_profile: true}
+log_dir: out/logs_sim
