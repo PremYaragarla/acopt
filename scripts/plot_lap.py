@@ -1,6 +1,6 @@
 """Plot a logged lap: path vs. reference, speed, sideslip tracking, controls.
 
-    python scripts/plot_lap.py configs/sim_test.yaml out/logs_sim/lap001.npy [--png out/lap.png]
+    python scripts/plot_lap.py configs/sim_test.yaml out/logs_sim/<session>/lap001.csv [--png out/lap.png]
 """
 import argparse
 import sys
@@ -14,6 +14,7 @@ import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 
 from acopt.session import load_track  # noqa: E402
+from acopt.telemetry import load_lap  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("config")
@@ -22,7 +23,7 @@ ap.add_argument("--png")
 a = ap.parse_args()
 cfgp = Path(a.config); root = cfgp.parent.parent
 tr = load_track(yaml.safe_load(cfgp.read_text())["track"], root)
-L = list(np.load(a.log, allow_pickle=True))
+L = load_lap(a.log)          # .csv or legacy .npy
 g = lambda k: np.array([l.get(k, np.nan) for l in L], dtype=float)
 s, n, nref, vx, vref = g("s"), g("n"), g("n_ref"), g("vx"), g("v_ref")
 beta, bref, mode = np.degrees(g("beta")), np.degrees(g("beta_ref")), g("mode")

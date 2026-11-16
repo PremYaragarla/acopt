@@ -34,14 +34,28 @@ class RaceLine:
         return self.X[:, IX[name]]
 
     def save(self, path):
-        np.savez(path, s=self.s, X=self.X, U=self.U, t=self.t, lap_time=self.lap_time,
-                 mu=self.mu, meta=np.array([str(self.meta)]))
+        """Atomic write (a crash mid-save must not leave a corrupt cache behind)."""
+        import json
+        path = Path(path)
+        tmp = path.with_name(path.stem + ".tmp.npz")
+        meta = {k: (v.item() if isinstance(v, np.generic) else v) for k, v in self.meta.items()}
+        np.savez(tmp, s=self.s, X=self.X, U=self.U, t=self.t, lap_time=self.lap_time,
+                 mu=self.mu, meta=np.array(json.dumps(meta, default=str)))
+        tmp.replace(path)
 
     @staticmethod
     def load(path):
-        d = np.load(path, allow_pickle=True)
-        return RaceLine(d["s"], d["X"], d["U"], d["t"], float(d["lap_time"]), d["mu"],
-                        {"loaded_from": str(path)})
+        import json
+        d = np.load(path, allow_pickle=False)
+        try:
+            meta = json.loads(str(d["meta"]))
+        except (ValueError, KeyError):
+            meta = {}
+        meta["loaded_from"] = str(path)
+        rl = RaceLine(d["s"], d["X"], d["U"], d["t"], float(d["lap_time"]), d["mu"], meta)
+        if rl.X.ndim != 2 or rl.X.shape[1] != NX or not np.all(np.isfinite(rl.X)):
+            raise ValueError("race line cache has an unexpected shape or non-finite values")
+        return rl
 
     def world(self, track: Track):
         return track.to_world(self.s, self.col("n"))

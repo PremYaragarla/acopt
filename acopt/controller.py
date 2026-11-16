@@ -20,7 +20,7 @@ import numpy as np
 from .env import Command, Measurement
 from .mpc import SpatialMPC, MPCResult
 from .track import Track, wrap
-from .vehicle import VehicleModel, IX, NX
+from .vehicle import VehicleModel, IX, NX, NU
 
 
 @dataclass
@@ -29,6 +29,7 @@ class SupervisorCfg:
     beta_spin_deg: float = 65.0
     max_solver_fails: int = 3
     solver_retries: int = 1
+    cold_restart: bool = True          # after failed retries, re-solve from a cold start
     rescue_with_ipopt: bool = True     # retry with the robust interior-point solver
     max_plan_age_s: float = 0.5        # how long a stale-but-valid plan may be executed
     offtrack_m: float = 2.5
@@ -128,7 +129,8 @@ class Controller:
                 a = 1 - np.exp(-2 * np.pi * g.lp_hz * dt)
                 self._acc += a * (raw - self._acc)
         self._prev = (m.t, m.vx, m.vy, m.r)
-        if not g.enabled or m.vx < 10 or self._prev is None:
+        if not g.enabled or m.vx < 10:
+            self._t_mu = m.t
             return
         p = self.model.p
         d = self.model.diagnostics(x, mu_ref * self.mu_hat)
@@ -141,13 +143,22 @@ class Controller:
         if abs(ay_pred) < 3.0:
             return
         ratio = np.clip(ay_meas / ay_pred, 0.5, 1.5)
-        dt = 0.01 if self._prev is None else max(m.t - getattr(self, "_t_mu", m.t), 0.0)
+        dt = float(np.clip(m.t - getattr(self, "_t_mu", m.t), 0.0, 0.1))
         self._t_mu = m.t
         self.mu_hat = float(np.clip(self.mu_hat * (1 + g.gain * dt * (ratio - 1)), g.lo, g.hi))
 
     # ---------------- main entry ----------------
     def step(self, m: Measurement) -> tuple[Command, dict]:
         c, sc = self.cfg, self.cfg.sup
+        vals = (m.t, m.X, m.Y, m.psi, m.vx, m.vy, m.r)
+        if not all(np.isfinite(v) for v in vals):
+            # corrupt telemetry frame: never feed NaNs to the solver - coast/brake straight
+            self.state = "SAFE_STOP"
+            info = dict(self.info) if self.info else dict(s=0.0, n=0.0, n_ref=0.0, vx=0.0, vy=0.0,
+                                                           r=0.0, beta=0.0, v_ref=0.0, beta_ref=0.0, mode=0.0)
+            info.update(t=m.t if np.isfinite(m.t) else info.get("t", 0.0), why="bad_telemetry",
+                        state="SAFE_STOP")
+            return self._out(Command(0.0, -0.6), info)
         s, x = self.frenet_state(m)
         ref = self.profile.sample(np.array([s]))
         beta = np.arctan2(m.vy, max(m.vx, 0.1))
@@ -156,7 +167,7 @@ class Controller:
         off = max(x[0] - wl, -wr - x[0])
         stale = (not m.fresh) or (self.t_last_meas is not None and m.t - self.t_last_meas > sc.stale_s)
         self.t_last_meas = m.t
-        info = dict(t=m.t, s=s, n=x[0], vx=m.vx, vy=m.vy, r=m.r, beta=beta,
+        info = dict(t=m.t, s=s, X=m.X, Y=m.Y, psi=m.psi, n=x[0], vx=m.vx, vy=m.vy, r=m.r, beta=beta,
                     v_ref=ref["v"][0], n_ref=ref["n"][0], beta_ref=ref["beta"][0],
                     mode=ref["mode"][0], tyres_out=m.tyres_out,
                     delta_act=float(x[IX["delta"]]), T_act=float(x[IX["T"]]))
@@ -166,6 +177,7 @@ class Controller:
         spinning = m.vx > 5 and abs(beta) > np.radians(sc.beta_spin_deg)
         if self.paused or stale or spinning:
             self.state = "PAUSED" if self.paused else "SAFE_STOP"
+            info["why"] = "paused" if self.paused else ("stale" if stale else "spin")
             cmd = Command(0.0, -0.6 if m.vx > 2 else 0.0)
             return self._out(cmd, info)
         if self.state == "SAFE_STOP":
@@ -173,6 +185,7 @@ class Controller:
             if m.vx < 3.0 and abs(m.r) < 0.3:
                 self.state, self.t_stable = "RECOVER", 0.0
                 self.mpc.reset()
+                self.res, self.fails = None, 0      # the pre-spin plan is meaningless now
             else:
                 return self._out(Command(0.0, -0.6 if m.vx > 2 else 0.0), info)
         if self.state == "RECOVER":
@@ -191,12 +204,16 @@ class Controller:
             u_now = self.res.command_at(m.t - self.t_plan + c.latency_s)[2] if self.res else (0, 0)
             sp, xp = self.predict(s, x.copy(), c.latency_s, u_now)
             mu_s = self.mu_hat * (1.0 if self.state == "MPC" else sc.safe_mu_scale)
-            res = self.mpc.solve(xp, sp, ds, self.track, self.profile, mu_scale=mu_s)
+            res = self._solve(xp, sp, ds, mu_s, False)
             for _ in range(sc.solver_retries):       # continue iterating from its own iterate
                 if res.ok:
                     break
-                res = self.mpc.solve(xp, sp, ds, self.track, self.profile, mu_scale=mu_s,
-                                     rescue=sc.rescue_with_ipopt)
+                res = self._solve(xp, sp, ds, mu_s, sc.rescue_with_ipopt)
+            if not res.ok and sc.cold_restart:
+                # the iterate is beyond repair: restart from the reference instead of from itself
+                self.mpc.reset()
+                res = self._solve(xp, sp, ds, mu_s, False)
+                info["cold_restart"] = True
             # a plan that needs track-limit slack is still the best available plan:
             # execute it, but flag the excursion (-> MPC_SAFE)
             self.pred_slack = res.max_slack if res.ok else getattr(self, "pred_slack", 0.0)
@@ -235,7 +252,7 @@ class Controller:
         info["why"] = why
 
         self._t_prev = m.t
-        if self.state in ("MPC", "MPC_SAFE") and self.res is not None:
+        if self.state in ("MPC", "MPC_SAFE") and not plan_expired:
             # sample the plan where the command will actually land (transport delay),
             # then invert the first-order lag by leading the plan by the lag constant:
             # x(t + tau) ~= x + tau*x_dot, but smooth (no steps from piecewise-constant u)
@@ -247,6 +264,38 @@ class Controller:
             cmd = self._fallback(s, x, m)
         info["state"] = self.state
         return self._out(cmd, info)
+
+    def _solve(self, xp, sp, ds, mu_s, rescue) -> MPCResult:
+        """MPC solve that can never take the control loop down: a solver exception is
+        reported as a failed solve, and the supervisor handles it like any other."""
+        try:
+            return self.mpc.solve(xp, sp, ds, self.track, self.profile, mu_scale=mu_s, rescue=rescue)
+        except Exception as e:  # noqa: BLE001 - casadi raises RuntimeError and friends
+            self.mpc.reset()
+            z = np.zeros
+            return MPCResult(z((self.mpc.N + 1, NX)), z((self.mpc.N, NU)), z(self.mpc.N + 1),
+                             z(self.mpc.N + 1), False, f"exception: {type(e).__name__}: {e}"[:120],
+                             0.0, float("nan"), 0.0, float("inf"))
+
+    def reset(self):
+        """Fresh start (new run / teleport to pits): forget plans, timers and observers."""
+        self.idx, self.state, self.fails, self.t_stable = None, "MPC", 0, 0.0
+        self.last_cmd, self.res, self.t_plan = Command(0.0, 0.0), None, -1e9
+        self.t_last_meas, self.t_act, self._prev = None, None, None
+        self.act[:] = 0.0
+        self._acc[:] = 0.0
+        self.pred_slack = 0.0
+        for a in ("_t_last_solve", "_t_prev", "_t_mu"):
+            if hasattr(self, a):
+                delattr(self, a)
+        self.mpc.reset()
+
+    def horizon(self):
+        """Latest MPC prediction as (s, n) arrays, or None (for display only)."""
+        res = self.res
+        if res is None or not res.ok:
+            return None
+        return res.s, res.X[:, IX["n"]]
 
     def _out(self, cmd, info):
         info.setdefault("state", self.state)
@@ -276,5 +325,9 @@ class Controller:
         # gentle: never stamp on the brakes mid-slide (that is what causes the spin)
         beta = np.arctan2(m.vy, max(m.vx, 0.1))
         T_min = -0.35 if abs(beta) < np.radians(8) else 0.0
-        T = np.clip(0.1 * (v_t - m.vx), T_min, 0.5)
+        # traction: full power at low speed just spins the rear wheels (and the car)
+        T_max = float(np.clip(0.12 + m.vx / 80.0, 0.12, 0.5))
+        if abs(beta) > np.radians(8):
+            T_max = min(T_max, 0.15)
+        T = np.clip(0.1 * (v_t - m.vx), T_min, T_max)
         return Command(delta, T)

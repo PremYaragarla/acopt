@@ -47,6 +47,79 @@ DEFAULT_WEIGHTS = {
 }
 
 
+WEIGHT_KEYS = {m: set(d) for m, d in DEFAULT_WEIGHTS.items()}
+
+
+class ProfileError(ValueError):
+    """A profile (YAML or live command) that cannot be applied. The message says why."""
+
+
+def _num(sg, key, lo, hi, default=None, what="segment"):
+    v = sg.get(key, default)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        raise ProfileError(f"{what}: '{key}' must be a number (got {sg.get(key)!r})") from None
+    if not np.isfinite(v) or not lo <= v <= hi:
+        raise ProfileError(f"{what}: '{key}' = {v:g} is outside the allowed range [{lo:g}, {hi:g}]")
+    return v
+
+
+def validate(cfg: dict, track_length: float) -> dict:
+    """Check and normalise a full profile config. Raises ProfileError with a clear
+    message instead of letting a typo reach the reference builder (and the car)."""
+    if not isinstance(cfg, dict):
+        raise ProfileError("profile must be a mapping (speed_scale / segments / weights)")
+    out = copy.deepcopy(cfg)
+    out["speed_scale"] = _num(out, "speed_scale", 0.3, 1.1, 1.0, "profile")
+    segs = out.get("segments") or []
+    if not isinstance(segs, list):
+        raise ProfileError("'segments' must be a list")
+    seen = set()
+    for i, sg in enumerate(segs):
+        if not isinstance(sg, dict):
+            raise ProfileError(f"segment #{i + 1} must be a mapping")
+        name = str(sg.get("name") or f"seg{i + 1}")
+        sg["name"] = name
+        what = f"segment '{name}'"
+        if name in seen:
+            raise ProfileError(f"{what}: duplicate segment name")
+        seen.add(name)
+        mode = sg.setdefault("mode", "race")
+        if mode not in ("race", "drift"):
+            raise ProfileError(f"{what}: mode must be 'race' or 'drift' (got {mode!r})")
+        for k in ("s_start", "s_end"):
+            if k not in sg:
+                raise ProfileError(f"{what}: '{k}' is required (metres from the start line, "
+                                   f"0..{track_length:.0f})")
+            sg[k] = _num(sg, k, -track_length, 2 * track_length, what=what)
+        span = (sg["s_end"] - sg["s_start"]) % track_length
+        if span < 5.0:
+            raise ProfileError(f"{what}: shorter than 5 m (s_start {sg['s_start']:g}, s_end {sg['s_end']:g})")
+        sg["blend_m"] = float(np.clip(_num(sg, "blend_m", 0.0, 500.0, 20.0, what), 1.0, span / 2))
+        sg["speed_scale"] = _num(sg, "speed_scale", 0.3, 1.2, 1.0, what)
+        if mode == "drift":
+            sg["beta_deg"] = _num(sg, "beta_deg", 0.0, 60.0, 15.0, what)
+            sg["lock_margin"] = _num(sg, "lock_margin", 0.3, 1.0, 0.85, what)
+        line = sg.get("line", "race")
+        if line not in ("race", "center"):
+            sg["line"] = _num(sg, "line", -15.0, 15.0, what=what)
+        if sg.get("speed") not in (None, "auto"):
+            sg["speed"] = _num(sg, "speed", 3.0, 100.0, what=what)
+    out["segments"] = segs
+    for mode, wd in (out.get("weights") or {}).items():
+        if mode not in WEIGHT_KEYS:
+            raise ProfileError(f"weights: unknown group '{mode}' (use race, drift or common)")
+        if not isinstance(wd, dict):
+            raise ProfileError(f"weights.{mode} must be a mapping")
+        for k in list(wd):
+            if k not in WEIGHT_KEYS[mode]:
+                raise ProfileError(f"weights.{mode}: unknown weight '{k}' "
+                                   f"(known: {', '.join(sorted(WEIGHT_KEYS[mode]))})")
+            wd[k] = _num(wd, k, 0.0, 1e7, what=f"weights.{mode}")
+    return out
+
+
 def _smoothstep(x):
     x = np.clip(x, 0, 1)
     return x * x * (3 - 2 * x)
@@ -70,7 +143,21 @@ class ReferenceProfile:
     # ---------------- config handling ----------------
     @staticmethod
     def load_yaml(path):
-        return yaml.safe_load(Path(path).read_text()) or {}
+        try:
+            data = yaml.safe_load(Path(path).read_text()) or {}
+        except yaml.YAMLError as e:
+            raise ProfileError(f"{path}: not valid YAML ({e})") from None
+        if not isinstance(data, dict):
+            raise ProfileError(f"{path}: profile must be a mapping")
+        return data
+
+    def as_dict(self) -> dict:
+        """Current profile as plain data (what save_yaml writes, what the UI shows)."""
+        with self._lock:
+            return copy.deepcopy(self.cfg)
+
+    def save_yaml(self, path):
+        Path(path).write_text(yaml.safe_dump(self.as_dict(), sort_keys=False))
 
     def update(self, patch: dict):
         """Merge a (partial) config and rebuild. Thread-safe; returns new version."""
@@ -85,7 +172,11 @@ class ReferenceProfile:
                     cfg["weights"].setdefault(mode, {}).update(wd)
             else:
                 cfg[k] = copy.deepcopy(v)
+        cfg = validate(cfg, self.track.length)   # raises ProfileError; nothing is applied then
         arrays, warnings = self._build(cfg)
+        for k, a in arrays.items():
+            if not np.all(np.isfinite(a)):
+                raise ProfileError(f"internal: reference '{k}' is not finite; profile not applied")
         with self._lock:
             self.cfg, self.arrays, self.warnings = cfg, arrays, warnings
             self.version += 1
@@ -94,17 +185,21 @@ class ReferenceProfile:
         return self.version
 
     def set_segment(self, name, **fields):
-        segs = copy.deepcopy(self.cfg["segments"])
-        for sg in segs:
-            if sg.get("name") == name:
-                sg.update(fields)
-                break
-        else:
-            segs.append(dict(name=name, **fields))
-        return self.update({"segments": segs})
+        with self._ulock:                       # read-modify-write must not interleave
+            segs = copy.deepcopy(self.cfg["segments"])
+            for sg in segs:
+                if sg.get("name") == name:
+                    sg.update(fields)
+                    break
+            else:
+                segs.append(dict(name=name, **fields))
+            return self._update({"segments": segs})
 
     def remove_segment(self, name):
-        return self.update({"segments": [s for s in self.cfg["segments"] if s.get("name") != name]})
+        with self._ulock:
+            if not any(s.get("name") == name for s in self.cfg["segments"]):
+                raise ProfileError(f"no segment named '{name}'")
+            return self._update({"segments": [s for s in self.cfg["segments"] if s.get("name") != name]})
 
     def set_raceline(self, rl: RaceLine):
         self.raceline = rl
@@ -184,8 +279,8 @@ class ReferenceProfile:
                 warnings.append(f"segment {sg.get('name')}: no drift equilibrium on "
                                 f"{100*miss[core].mean():.0f}% of the segment; using race speed there")
             V[miss] = race["v"][miss]; beta_used[miss] = 0.0
-            if core.any() and (beta_used[core] < beta_deg - 1e-6).any():
-                lo = beta_used[core & ~miss].min() if (core & ~miss).any() else 0
+            lo = beta_used[core & ~miss].min() if (core & ~miss).any() else 0
+            if core.any() and lo < beta_deg - 0.5:
                 warnings.append(f"segment {sg.get('name')}: {beta_deg:.0f} deg not sustainable everywhere "
                                 f"(steering lock / power); reduced to >= {lo:.0f} deg where needed")
             beta_used = gaussian_filter1d(beta_used, 10.0 / tr.ds, mode="wrap")
@@ -202,6 +297,16 @@ class ReferenceProfile:
         return out, warnings
 
     # ---------------- query ----------------
+    def reference(self, step: int = 2) -> dict:
+        """Whole-lap reference arrays in display units (km/h, degrees) for plotting."""
+        with self._lock:
+            arr = self.arrays
+        sl = slice(None, None, max(1, int(step)))
+        r = lambda a, nd=2: np.round(a[sl], nd).tolist()
+        return dict(s=r(self.track.s, 1), v=r(3.6 * arr["v"]), beta=r(np.degrees(arr["beta"])),
+                    n=r(arr["n"]), mode=r(arr["mode"]), T=r(100 * arr["T"], 1),
+                    steer=r(np.degrees(arr["delta"])), mu=r(arr["mu"], 3))
+
     def sample(self, s_query):
         with self._lock:
             arr = self.arrays

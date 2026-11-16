@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import deque
 
+import casadi as ca
 import numpy as np
 
 from .env import Env, Measurement, Command
@@ -31,6 +32,7 @@ class SimEnv(Env):
         self.noise = noise
         self.grip_map = grip_map        # callable s -> mu scale
         self.rng = np.random.default_rng(seed)
+        self._step_fn = self._build_step()
         self.reset()
 
     def reset(self, s0=0.0, n0=0.0, v0=30.0, **kw):
@@ -43,32 +45,46 @@ class SimEnv(Env):
         self.lap, self._s_prev = 0, s0
         return self.read()
 
-    def _deriv(self, st, dcmd, Tcmd, mu):
-        X, Y, psi, vx, vy, r, d, T = st
-        vx_dot, vy_dot, r_dot = np.array(self.model.f_body([max(vx, 1.0), vy, r, d, T], mu)).ravel()
-        if vx < 1.0:  # crude low-speed handling
-            vy_dot, r_dot = -vy * 5, -r * 5
-        return np.array([vx * np.cos(psi) - vy * np.sin(psi),
-                         vx * np.sin(psi) + vy * np.cos(psi), r,
-                         vx_dot, vy_dot, r_dot,
-                         (dcmd - d) / self.tau_d, (Tcmd - T) / self.tau_T])
+    def _build_step(self):
+        """One RK4 sub-step of the 8-state truth model as a single compiled function
+        (about 10x faster than calling the model four times from Python)."""
+        st = ca.SX.sym("st", 8)
+        dcmd, Tcmd, mu, h = (ca.SX.sym(n) for n in ("dcmd", "Tcmd", "mu", "h"))
+
+        def deriv(x):
+            psi, vx, vy, r, d, T = x[2], x[3], x[4], x[5], x[6], x[7]
+            bd = self.model.f_body(ca.vertcat(ca.fmax(vx, 1.0), vy, r, d, T), mu)
+            slow = vx < 1.0                       # crude low-speed handling
+            vy_dot = ca.if_else(slow, -vy * 5, bd[1])
+            r_dot = ca.if_else(slow, -r * 5, bd[2])
+            return ca.vertcat(vx * ca.cos(psi) - vy * ca.sin(psi),
+                              vx * ca.sin(psi) + vy * ca.cos(psi), r,
+                              bd[0], vy_dot, r_dot,
+                              (dcmd - d) / self.tau_d, (Tcmd - T) / self.tau_T)
+
+        k1 = deriv(st)
+        k2 = deriv(st + h / 2 * k1)
+        k3 = deriv(st + h / 2 * k2)
+        k4 = deriv(st + h * k3)
+        nxt = st + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        return ca.Function("sim_step", [st, dcmd, Tcmd, mu, h], [nxt])
+
+    def kick(self, yaw_rate: float = 0.0, vy: float = 0.0):
+        """Disturbance for robustness tests: add yaw rate [rad/s] / lateral speed [m/s]."""
+        self.state[5] += yaw_rate
+        self.state[4] += vy
 
     def step(self, dt):
         nsub = max(1, int(round(dt / self.dt)))
         for _ in range(nsub):
             self.delay.append((self.cmd.delta, self.cmd.T))
             dcmd, Tcmd = self.delay[0]
-            dcmd = np.clip(dcmd, -self.p.delta_max, self.p.delta_max)
-            Tcmd = np.clip(Tcmd, -1, 1)
+            dcmd = float(np.clip(dcmd, -self.p.delta_max, self.p.delta_max))
+            Tcmd = float(np.clip(Tcmd, -1, 1))
             mu = self.grip_map(self._s) if self.grip_map else 1.0
-            h, st = self.dt, self.state
-            k1 = self._deriv(st, dcmd, Tcmd, mu)
-            k2 = self._deriv(st + h / 2 * k1, dcmd, Tcmd, mu)
-            k3 = self._deriv(st + h / 2 * k2, dcmd, Tcmd, mu)
-            k4 = self._deriv(st + h * k3, dcmd, Tcmd, mu)
-            self.state = st + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+            self.state = np.array(self._step_fn(self.state, dcmd, Tcmd, mu, self.dt)).ravel()
             self.state[3] = max(self.state[3], 0.0)
-            self.t += h
+            self.t += self.dt
         s, n, _, self._idx = self.track.to_frenet(self.state[0], self.state[1], hint=self._idx)
         if self._s_prev > 0.8 * self.track.length and s < 0.2 * self.track.length:
             self.lap += 1
@@ -88,7 +104,7 @@ class SimEnv(Env):
             vx=vx + z * 0.05 * self.rng.normal(), vy=vy + z * 0.03 * self.rng.normal(),
             r=r + z * 0.005 * self.rng.normal(), delta=d, T=T,
             tyres_out=tyres_out, lap=self.lap,
-            extra=dict(true_s=s, true_n=n))
+            extra=dict(true_s=s, true_n=n, speed_kmh=3.6 * float(np.hypot(vx, vy))))
 
     def write(self, cmd: Command):
         self.cmd = cmd
